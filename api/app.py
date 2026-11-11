@@ -444,272 +444,283 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _push(self):
-        corpo = read_body(self)
-        competencia = corpo.get("competencia", "2026-11")[:7]
-        ops = corpo.get("ops", [])
-        token = corpo.get("token", "")
+        try:
+            corpo = read_body(self)
+            competencia = corpo.get("competencia", "2026-11")[:7]
+            ops = corpo.get("ops", [])
+            token = corpo.get("token", "")
 
-        u = resolver_token(token)
-        if not u:
-            json_response(self, {"ok": False, "erro": "token inválido"}, 401)
-            return
+            u = resolver_token(token)
+            if not u:
+                json_response(self, {"ok": False, "erro": "token inválido"}, 401)
+                return
 
-        perfil = u["perfil"]
+            perfil = u["perfil"]
 
-        elenco_rows = sb_select("elenco", {"competencia": competencia}) or []
-        elenco_map = {e["militar_id"]: e for e in elenco_rows}
+            elenco_rows = sb_select("elenco", {"competencia": competencia}) or []
+            elenco_map = {e["militar_id"]: e for e in elenco_rows}
 
-        marcas_rows = sb_select("marcas", {"competencia": competencia}) or []
-        marcas_map = {}
-        for m in marcas_rows:
-            marcas_map[f"{m['grupo']}|{m['militar_id']}|{m['dia']}"] = m
+            marcas_rows = sb_select("marcas", {"competencia": competencia}) or []
+            marcas_map = {}
+            for m in marcas_rows:
+                marcas_map[f"{m['grupo']}|{m['militar_id']}|{m['dia']}"] = m
 
-        comentarios_rows = sb_select("comments", {"competencia": competencia}) or []
-        comentarios_map = {}
-        for c in comentarios_rows:
-            comentarios_map[c["chave"]] = c
+            comentarios_rows = sb_select("comments", {"competencia": competencia}) or []
+            comentarios_map = {}
+            for c in comentarios_rows:
+                comentarios_map[c["chave"]] = c
 
-        aco_rows = sb_select("aco_oficiais", {"competencia": competencia}) or []
-        aco_map = {}
-        for r in aco_rows:
-            aco_map.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
+            aco_rows = sb_select("aco_oficiais", {"competencia": competencia}) or []
+            aco_map = {}
+            for r in aco_rows:
+                aco_map.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
 
-        # ---- estado de meta/extras (vis, visLinhas, aco, status, params) ----
-        meta_rows = sb_select("meta", {"competencia": competencia}) or []
-        meta_base = meta_rows[0] if meta_rows else {}
-        meta_status = meta_base.get("status", "ativa") or "ativa"
-        meta_params = meta_base.get("params_json")
-        meta_versao = int(meta_base.get("versao") or 0)
-        meta_extras = dict(meta_base.get("extras_json") or {})
-        if not isinstance(meta_extras.get("vis"), dict):
-            meta_extras["vis"] = {}
-        if not isinstance(meta_extras.get("visLinhas"), dict):
-            meta_extras["visLinhas"] = {}
-        if not isinstance(meta_extras.get("aco"), list):
-            meta_extras["aco"] = []
-        meta_alterada = False
+            # ---- estado de meta/extras (vis, visLinhas, aco, status, params) ----
+            meta_rows = sb_select("meta", {"competencia": competencia}) or []
+            meta_base = meta_rows[0] if meta_rows else {}
+            meta_status = meta_base.get("status", "ativa") or "ativa"
+            meta_params = meta_base.get("params_json")
+            meta_versao = int(meta_base.get("versao") or 0)
+            meta_extras = dict(meta_base.get("extras_json") or {})
+            if not isinstance(meta_extras.get("vis"), dict):
+                meta_extras["vis"] = {}
+            if not isinstance(meta_extras.get("visLinhas"), dict):
+                meta_extras["visLinhas"] = {}
+            if not isinstance(meta_extras.get("aco"), list):
+                meta_extras["aco"] = []
+            meta_alterada = False
 
-        recusadas = []
-        aplicadas = 0
-        deletadas = 0
-        agora = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            recusadas = []
+            aplicadas = 0
+            deletadas = 0
+            agora = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        lista = sorted(ops, key=lambda op: 0 if (op and op.get("t") == "elenco") else 1)
+            lista = sorted(ops, key=lambda op: 0 if (op and op.get("t") == "elenco") else 1)
 
-        for op in lista:
-            motivo = ""
-            if not op or not op.get("t"):
-                motivo = "op sem tipo"
-            elif op["t"] == "marca":
-                k = op.get("k", "")
-                p = str(k).split("|")
-                if len(p) < 3:
-                    motivo = "chave de marca inválida"
-                elif not pode_gravar(perfil, p[0], p[1], elenco_map):
-                    motivo = f"perfil {perfil} não pode gravar em {p[0]}"
-                else:
-                    if op.get("v") not in (None, ""):
-                        marcas_map[k] = {
-                            "competencia": competencia,
-                            "grupo": p[0],
-                            "militar_id": p[1],
-                            "dia": p[2],
-                            "codigo": op["v"],
-                            "ts": agora,
-                            "autor": u["nome"],
-                        }
+            for op in lista:
+                motivo = ""
+                if not op or not op.get("t"):
+                    motivo = "op sem tipo"
+                elif op["t"] == "marca":
+                    k = op.get("k", "")
+                    p = str(k).split("|")
+                    if len(p) < 3:
+                        motivo = "chave de marca inválida"
+                    elif not pode_gravar(perfil, p[0], p[1], elenco_map):
+                        motivo = f"perfil {perfil} não pode gravar em {p[0]}"
                     else:
-                        if k in marcas_map:
-                            del marcas_map[k]
-                            deletadas += 1
-                    aplicadas += 1
-            elif op["t"] == "comment":
-                k = op.get("k", "")
-                if not k:
-                    motivo = "comment sem chave"
-                else:
-                    if op.get("v") not in (None, ""):
-                        comentarios_map[k] = {
-                            "competencia": competencia,
-                            "chave": k,
-                            "texto": op["v"],
-                            "ts": agora,
-                            "autor": u["nome"],
-                        }
+                        if op.get("v") not in (None, ""):
+                            marcas_map[k] = {
+                                "competencia": competencia,
+                                "grupo": p[0],
+                                "militar_id": p[1],
+                                "dia": p[2],
+                                "codigo": op["v"],
+                                "ts": agora,
+                                "autor": u["nome"],
+                            }
+                        else:
+                            if k in marcas_map:
+                                del marcas_map[k]
+                                deletadas += 1
+                        aplicadas += 1
+                elif op["t"] == "comment":
+                    k = op.get("k", "")
+                    if not k:
+                        motivo = "comment sem chave"
                     else:
-                        comentarios_map.pop(k, None)
-                    aplicadas += 1
-            elif op["t"] == "aco":
-                aco_add = [x for x in (op.get("add") or []) if x]
-                aco_del = [x for x in (op.get("del") or []) if x]
-                fora = []
-                for id_ in aco_add + aco_del:
-                    mm = elenco_map.get(id_)
-                    if perfil not in ("Admin", "Mestre") and not (
-                        mm and str(mm.get("secao")) == str(perfil)
-                    ):
-                        fora.append(id_)
-                if fora:
-                    motivo = "sem permissão para ACO de: " + ", ".join(fora[:3])
-                else:
-                    atual = list(meta_extras.get("aco") or [])
-                    for id_ in aco_add:
-                        if id_ not in atual:
-                            atual.append(id_)
-                    for id_ in aco_del:
-                        if id_ in atual:
-                            atual.remove(id_)
-                    meta_extras["aco"] = atual
-                    meta_alterada = True
-                    aplicadas += 1
-            elif op["t"] == "vis":
-                sb_alvo = op.get("sb", "")
-                if sb_alvo not in SBS_VALIDAS:
-                    motivo = "sb inválida"
-                elif perfil not in ("Admin", "Mestre") and str(sb_alvo) != str(perfil):
-                    motivo = f"perfil {perfil} não pode gravar visitantes de {sb_alvo}"
-                else:
-                    lista_ids = op.get("lista") or []
-                    if not isinstance(lista_ids, list):
-                        motivo = "lista inválida"
+                        if op.get("v") not in (None, ""):
+                            comentarios_map[k] = {
+                                "competencia": competencia,
+                                "chave": k,
+                                "texto": op["v"],
+                                "ts": agora,
+                                "autor": u["nome"],
+                            }
+                        else:
+                            comentarios_map.pop(k, None)
+                        aplicadas += 1
+                elif op["t"] == "aco":
+                    aco_add = [x for x in (op.get("add") or []) if x]
+                    aco_del = [x for x in (op.get("del") or []) if x]
+                    fora = []
+                    for id_ in aco_add + aco_del:
+                        mm = elenco_map.get(id_)
+                        if perfil not in ("Admin", "Mestre") and not (
+                            mm and str(mm.get("secao")) == str(perfil)
+                        ):
+                            fora.append(id_)
+                    if fora:
+                        motivo = "sem permissão para ACO de: " + ", ".join(fora[:3])
                     else:
-                        meta_extras["vis"][sb_alvo] = [str(x) for x in lista_ids if x]
-                        if "linhas" in op and op["linhas"] is not None:
-                            try:
-                                meta_extras["visLinhas"][sb_alvo] = int(op["linhas"])
-                            except (ValueError, TypeError):
-                                pass
+                        atual = list(meta_extras.get("aco") or [])
+                        for id_ in aco_add:
+                            if id_ not in atual:
+                                atual.append(id_)
+                        for id_ in aco_del:
+                            if id_ in atual:
+                                atual.remove(id_)
+                        meta_extras["aco"] = atual
                         meta_alterada = True
                         aplicadas += 1
-            elif op["t"] == "elenco":
-                mid = op.get("id")
-                if not mid:
-                    motivo = "elenco sem id"
-                else:
-                    campos = op.get("campos") or {}
-                    base = dict(elenco_map.get(mid, {"competencia": competencia, "militar_id": mid}))
-                    secao_alvo = campos.get("secao") or base.get("secao") or ""
-                    if perfil not in ("Admin", "Mestre") and str(secao_alvo) != str(perfil):
-                        motivo = f"perfil {perfil} não pode definir elenco de {secao_alvo}"
+                elif op["t"] == "vis":
+                    sb_alvo = op.get("sb", "")
+                    if sb_alvo not in SBS_VALIDAS:
+                        motivo = "sb inválida"
+                    elif perfil not in ("Admin", "Mestre") and str(sb_alvo) != str(perfil):
+                        motivo = f"perfil {perfil} não pode gravar visitantes de {sb_alvo}"
                     else:
-                        for k2, v in campos.items():
-                            if k2 == "afast":
-                                base["afast_json"] = v if v is not None else []
-                            else:
-                                base[k2] = v
-                        base["competencia"] = competencia
-                        base["militar_id"] = mid
-                        elenco_map[mid] = base
-                        aplicadas += 1
-            elif op["t"] == "mov":
-                d = op.get("dados") or {}
-                sb_request("POST", "movimentos", body={
-                    "competencia": competencia,
-                    "quando": d.get("quando", ""),
-                    "tipo": d.get("tipo", ""),
-                    "origem": d.get("origem", ""),
-                    "destino": d.get("destino", ""),
-                    "qtd": d.get("qtd", 0),
-                    "motivo": d.get("motivo", ""),
-                    "autor": d.get("autor") or u["nome"],
-                })
-                aplicadas += 1
-            elif op["t"] == "oficial":
-                dia = op.get("dia", "")
-                turno = op.get("turno", "")
-                oficial = op.get("v", "") or ""
-                if not dia or not turno:
-                    motivo = "oficial sem dia/turno"
-                else:
-                    aco_map.setdefault(dia, {"t1": "", "t2": ""})[turno] = oficial
-                    aplicadas += 1
-            elif op["t"] == "meta":
-                if perfil not in ("Admin", "Mestre"):
-                    motivo = "meta exige Mestre ou Admin"
-                else:
-                    campos_meta = op.get("campos") or {}
-                    if "statusMes" in campos_meta and campos_meta["statusMes"]:
-                        meta_status = campos_meta["statusMes"]
-                    if "params" in campos_meta and campos_meta["params"] is not None:
-                        meta_params = campos_meta["params"]
-                    meta_alterada = True
-                    aplicadas += 1
-            else:
-                motivo = f"tipo desconhecido: {op.get('t')}"
-
-            if motivo:
-                recusadas.append({"t": op.get("t"), "motivo": motivo})
-
-        if deletadas > LIMITE_DELETES:
-            json_response(
-                self,
-                {
-                    "ok": False,
-                    "fatal": True,
-                    "aplicadas": 0,
-                    "recusadas": recusadas,
-                    "erro": f"Lote recusado: apagaria {deletadas} marcas (limite {LIMITE_DELETES})",
-                },
-                400,
-            )
-            return
-
-        try:
-            sb_delete("marcas", {"competencia": competencia})
-        except Exception:
-            pass
-        if marcas_map:
-            sb_request("POST", "marcas", body=list(marcas_map.values()))
-
-        try:
-            sb_delete("comments", {"competencia": competencia})
-        except Exception:
-            pass
-        if comentarios_map:
-            sb_request("POST", "comments", body=list(comentarios_map.values()))
-
-        try:
-            sb_delete("elenco", {"competencia": competencia})
-        except Exception:
-            pass
-        if elenco_map:
-            sb_request("POST", "elenco", body=list(elenco_map.values()))
-
-        try:
-            sb_delete("aco_oficiais", {"competencia": competencia})
-        except Exception:
-            pass
-        if aco_map:
-            aco_rows_out = []
-            for dia, turnos in aco_map.items():
-                for turno in ("t1", "t2"):
-                    aco_rows_out.append({
+                        lista_ids = op.get("lista") or []
+                        if not isinstance(lista_ids, list):
+                            motivo = "lista inválida"
+                        else:
+                            meta_extras["vis"][sb_alvo] = [str(x) for x in lista_ids if x]
+                            if "linhas" in op and op["linhas"] is not None:
+                                try:
+                                    meta_extras["visLinhas"][sb_alvo] = int(op["linhas"])
+                                except (ValueError, TypeError):
+                                    pass
+                            meta_alterada = True
+                            aplicadas += 1
+                elif op["t"] == "elenco":
+                    mid = op.get("id")
+                    if not mid:
+                        motivo = "elenco sem id"
+                    else:
+                        campos = op.get("campos") or {}
+                        base = dict(elenco_map.get(mid, {"competencia": competencia, "militar_id": mid}))
+                        secao_alvo = campos.get("secao") or base.get("secao") or ""
+                        if perfil not in ("Admin", "Mestre") and str(secao_alvo) != str(perfil):
+                            motivo = f"perfil {perfil} não pode definir elenco de {secao_alvo}"
+                        else:
+                            for k2, v in campos.items():
+                                if k2 == "afast":
+                                    base["afast_json"] = v if v is not None else []
+                                else:
+                                    base[k2] = v
+                            base["competencia"] = competencia
+                            base["militar_id"] = mid
+                            elenco_map[mid] = base
+                            aplicadas += 1
+                elif op["t"] == "mov":
+                    d = op.get("dados") or {}
+                    sb_request("POST", "movimentos", body={
                         "competencia": competencia,
-                        "dia": dia,
-                        "turno": turno,
-                        "oficial": turnos.get(turno, ""),
+                        "quando": d.get("quando", ""),
+                        "tipo": d.get("tipo", ""),
+                        "origem": d.get("origem", ""),
+                        "destino": d.get("destino", ""),
+                        "qtd": d.get("qtd", 0),
+                        "motivo": d.get("motivo", ""),
+                        "autor": d.get("autor") or u["nome"],
                     })
-            if aco_rows_out:
-                sb_request("POST", "aco_oficiais", body=aco_rows_out)
+                    aplicadas += 1
+                elif op["t"] == "oficial":
+                    dia = op.get("dia", "")
+                    turno = op.get("turno", "")
+                    oficial = op.get("v", "") or ""
+                    if not dia or not turno:
+                        motivo = "oficial sem dia/turno"
+                    else:
+                        aco_map.setdefault(dia, {"t1": "", "t2": ""})[turno] = oficial
+                        aplicadas += 1
+                elif op["t"] == "meta":
+                    if perfil not in ("Admin", "Mestre"):
+                        motivo = "meta exige Mestre ou Admin"
+                    else:
+                        campos_meta = op.get("campos") or {}
+                        if "statusMes" in campos_meta and campos_meta["statusMes"]:
+                            meta_status = campos_meta["statusMes"]
+                        if "params" in campos_meta and campos_meta["params"] is not None:
+                            meta_params = campos_meta["params"]
+                        meta_alterada = True
+                        aplicadas += 1
+                else:
+                    motivo = f"tipo desconhecido: {op.get('t')}"
 
-        if meta_alterada:
-            try:
-                sb_request(
-                    "POST", "meta",
-                    body={
-                        "competencia": competencia,
-                        "status": meta_status,
-                        "params_json": meta_params,
-                        "extras_json": meta_extras,
-                        "versao": meta_versao + 1,
+                if motivo:
+                    recusadas.append({"t": op.get("t"), "motivo": motivo})
+
+            if deletadas > LIMITE_DELETES:
+                json_response(
+                    self,
+                    {
+                        "ok": False,
+                        "fatal": True,
+                        "aplicadas": 0,
+                        "recusadas": recusadas,
+                        "erro": f"Lote recusado: apagaria {deletadas} marcas (limite {LIMITE_DELETES})",
                     },
-                    extra_headers={"Prefer": "resolution=merge-duplicates"},
+                    400,
                 )
+                return
+
+            try:
+                sb_delete("marcas", {"competencia": competencia})
             except Exception:
                 pass
+            if marcas_map:
+                sb_request("POST", "marcas", body=list(marcas_map.values()))
 
-        versao_final = (meta_versao + 1) if meta_alterada else meta_versao
-        json_response(self, {"ok": True, "versao": versao_final, "aplicadas": aplicadas, "recusadas": recusadas})
+            try:
+                sb_delete("comments", {"competencia": competencia})
+            except Exception:
+                pass
+            if comentarios_map:
+                sb_request("POST", "comments", body=list(comentarios_map.values()))
+
+            try:
+                sb_delete("elenco", {"competencia": competencia})
+            except Exception:
+                pass
+            if elenco_map:
+                sb_request("POST", "elenco", body=list(elenco_map.values()))
+
+            try:
+                sb_delete("aco_oficiais", {"competencia": competencia})
+            except Exception:
+                pass
+            if aco_map:
+                aco_rows_out = []
+                for dia, turnos in aco_map.items():
+                    for turno in ("t1", "t2"):
+                        aco_rows_out.append({
+                            "competencia": competencia,
+                            "dia": dia,
+                            "turno": turno,
+                            "oficial": turnos.get(turno, ""),
+                        })
+                if aco_rows_out:
+                    sb_request("POST", "aco_oficiais", body=aco_rows_out)
+
+            if meta_alterada:
+                try:
+                    sb_request(
+                        "POST", "meta",
+                        body={
+                            "competencia": competencia,
+                            "status": meta_status,
+                            "params_json": meta_params,
+                            "extras_json": meta_extras,
+                            "versao": meta_versao + 1,
+                        },
+                        extra_headers={"Prefer": "resolution=merge-duplicates"},
+                    )
+                except Exception:
+                    pass
+
+            versao_final = (meta_versao + 1) if meta_alterada else meta_versao
+            json_response(self, {"ok": True, "versao": versao_final, "aplicadas": aplicadas, "recusadas": recusadas})
+    
+        except Exception as e:
+            import traceback
+            erro_detalhado = traceback.format_exc()
+            print(erro_detalhado)  # Para aparecer nos logs do Vercel também
+            json_response(self, {
+                "ok": False, 
+                "erro": str(e), 
+                "traceback": erro_detalhado
+            }, 500)
 
     def _redefinir_pin(self):
         corpo = read_body(self)
