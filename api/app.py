@@ -54,10 +54,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
-        if path == "/" or path == "":
+        if path == "/" or path == "" or path == "index_v14.html":
             self._serve_index()
             return
-        json_response(self, {"ok": False, "erro": "rota nao encontrada"}, 404)
+        # Qualquer outro GET serve o SPA (favicon, etc. caem aqui)
+        self._serve_index()
 
     # ---------- index ----------
     def _serve_index(self):
