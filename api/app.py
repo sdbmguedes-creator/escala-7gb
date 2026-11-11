@@ -674,7 +674,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             if elenco_map:
-                sb_request("POST", "elenco", body=list(elenco_map.values()))
+            
+                # Remove a chave 'id' (que não existe mais no banco) antes de enviar
+                elenco_limpo = []
+                for linha in elenco_map.values():
+                    linha_copia = dict(linha)
+                    linha_copia.pop("id", None)  # Remove o campo 'id' se ele estiver presente
+                    elenco_limpo.append(linha_copia)
+                    
+                sb_request("POST", "elenco", body=elenco_limpo)
 
             try:
                 sb_delete("aco_oficiais", {"competencia": competencia})
