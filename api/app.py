@@ -1,5 +1,6 @@
 from http.server import BaseHTTPRequestHandler
 import os, sys, json, hashlib, uuid, datetime
+from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from supabase_client import sb_select, sb_request, sb_upsert, sb_delete
 from utils import json_response, read_body
@@ -77,45 +78,26 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(corpo)
 
     # ---------- dispatch POST ----------
-        def do_POST(self):
-        from urllib.parse import urlparse, parse_qs
+    def do_POST(self):
+        path_original = self.path
         
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
         
-        # Resgata o caminho original que o Vercel separou para nós
+        # Resgata o caminho original que o Vercel separou para nós via query param
         original_path = query.get("originalPath", [None])[0]
         if original_path:
             path = "/" + original_path
 
         # ------------------------------------------------------------
-        # Normalização (mantida como fallback)
+        # Normalização tolerante (fallback caso o query param falhe)
         # ------------------------------------------------------------
         if path.startswith("/api/app"):
             path = path[len("/api/app"):]
         if path.startswith("/api"):
             path = path[len("/api"):]
             
-        if path in ("", "/", "/app", "/app/"):
-            path = ""
-        elif not path.startswith("/"):
-            path = "/" + path
-
-        # ------------------------------------------------------------
-        # Normalização tolerante ao roteamento do @vercel/python.
-        # O Vercel pode entregar self.path de várias formas:
-        #   /setup_inicial
-        #   /api/setup_inicial
-        #   /api/app
-        #   /api/app/setup_inicial
-        #   /api/app/
-        # Aqui reduzimos todos ao formato "/<rota>" para bater no dict.
-        # ------------------------------------------------------------
-        if path.startswith("/api/app"):
-            path = path[len("/api/app"):]
-        if path.startswith("/api"):
-            path = path[len("/api"):]
         if path in ("", "/", "/app", "/app/"):
             path = ""
         elif not path.startswith("/"):
