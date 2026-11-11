@@ -624,6 +624,8 @@ class Handler(BaseHTTPRequestHandler):
 
         json_response(self, {"ok": True, "versao": 1, "aplicadas": aplicadas, "recusadas": recusadas})
 
+
+
     def _redefinir_pin(self):
         corpo = read_body(self)
         u = resolver_token(corpo.get("token", ""))
@@ -657,6 +659,6 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         json_response(self, {"ok": True})
- 
-  
- 
+
+# Entry point esperado pelo @vercel/python
+handler = Handler
