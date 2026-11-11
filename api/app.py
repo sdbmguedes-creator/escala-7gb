@@ -38,6 +38,7 @@ def pode_gravar(perfil, grupo, militar_id, elenco_map):
 
 
 PERFIS_VALIDOS = ["Admin", "Mestre", "1ªSB", "2ªSB", "3ªSB", "4ªSB"]
+SBS_VALIDAS = ["1ªSB", "2ªSB", "3ªSB", "4ªSB"]
 LIMITE_DELETES = 60
 
 
@@ -54,7 +55,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        # Qualquer GET (raiz, favicon, etc.) serve o SPA.
         self._serve_index()
 
     # ---------- index ----------
@@ -80,24 +80,18 @@ class Handler(BaseHTTPRequestHandler):
     # ---------- dispatch POST ----------
     def do_POST(self):
         path_original = self.path
-        
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
-        
-        # Resgata o caminho original que o Vercel separou para nós via query param
+
         original_path = query.get("originalPath", [None])[0]
         if original_path:
             path = "/" + original_path
 
-        # ------------------------------------------------------------
-        # Normalização tolerante (fallback caso o query param falhe)
-        # ------------------------------------------------------------
         if path.startswith("/api/app"):
             path = path[len("/api/app"):]
         if path.startswith("/api"):
             path = path[len("/api"):]
-            
         if path in ("", "/", "/app", "/app/"):
             path = ""
         elif not path.startswith("/"):
@@ -107,6 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             "/setup_inicial": self._setup_inicial,
             "/login": self._login,
             "/logout": self._logout,
+            "/bootstrap": self._bootstrap,
             "/criar_usuario": self._criar_usuario,
             "/listar_usuarios": self._listar_usuarios,
             "/revogar_usuario": self._revogar_usuario,
@@ -248,6 +243,15 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         json_response(self, {"ok": True})
 
+    def _bootstrap(self):
+        corpo = read_body(self)
+        token = corpo.get("token", "")
+        u = resolver_token(token)
+        if not u:
+            json_response(self, {"ok": False, "erro": "token inválido"}, 401)
+            return
+        json_response(self, {"ok": True, "perfil": u["perfil"], "nome": u["nome"]})
+
     def _criar_usuario(self):
         corpo = read_body(self)
         u = resolver_token(corpo.get("token", ""))
@@ -365,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
 
         meta_rows = sb_select("meta", {"competencia": competencia}) or []
         versao = meta_rows[0].get("versao", 0) if meta_rows else 0
-        extras = meta_rows[0].get("extras_json") or {} if meta_rows else {}
+        extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
 
         if desde is not None and str(desde) == str(versao):
             json_response(self, {"ok": True, "versao": versao, "semMudanca": True})
@@ -421,6 +425,7 @@ class Handler(BaseHTTPRequestHandler):
             "status": meta_rows[0].get("status", "ativa") if meta_rows else "ativa",
             "params": meta_rows[0].get("params_json") if meta_rows else None,
             "vis": extras.get("vis", {}),
+            "visLinhas": extras.get("visLinhas", {}),
             "aco": extras.get("aco", []),
         }
 
@@ -468,6 +473,21 @@ class Handler(BaseHTTPRequestHandler):
         aco_map = {}
         for r in aco_rows:
             aco_map.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
+
+        # ---- estado de meta/extras (vis, visLinhas, aco, status, params) ----
+        meta_rows = sb_select("meta", {"competencia": competencia}) or []
+        meta_base = meta_rows[0] if meta_rows else {}
+        meta_status = meta_base.get("status", "ativa") or "ativa"
+        meta_params = meta_base.get("params_json")
+        meta_versao = int(meta_base.get("versao") or 0)
+        meta_extras = dict(meta_base.get("extras_json") or {})
+        if not isinstance(meta_extras.get("vis"), dict):
+            meta_extras["vis"] = {}
+        if not isinstance(meta_extras.get("visLinhas"), dict):
+            meta_extras["visLinhas"] = {}
+        if not isinstance(meta_extras.get("aco"), list):
+            meta_extras["aco"] = []
+        meta_alterada = False
 
         recusadas = []
         aplicadas = 0
@@ -529,13 +549,38 @@ class Handler(BaseHTTPRequestHandler):
                         mm and str(mm.get("secao")) == str(perfil)
                     ):
                         fora.append(id_)
-                if aco_add or aco_del:
-                    if fora:
-                        motivo = "sem permissão para ACO de: " + ", ".join(fora[:3])
-                    else:
-                        aplicadas += 1
+                if fora:
+                    motivo = "sem permissão para ACO de: " + ", ".join(fora[:3])
                 else:
+                    atual = list(meta_extras.get("aco") or [])
+                    for id_ in aco_add:
+                        if id_ not in atual:
+                            atual.append(id_)
+                    for id_ in aco_del:
+                        if id_ in atual:
+                            atual.remove(id_)
+                    meta_extras["aco"] = atual
+                    meta_alterada = True
                     aplicadas += 1
+            elif op["t"] == "vis":
+                sb_alvo = op.get("sb", "")
+                if sb_alvo not in SBS_VALIDAS:
+                    motivo = "sb inválida"
+                elif perfil not in ("Admin", "Mestre") and str(sb_alvo) != str(perfil):
+                    motivo = f"perfil {perfil} não pode gravar visitantes de {sb_alvo}"
+                else:
+                    lista_ids = op.get("lista") or []
+                    if not isinstance(lista_ids, list):
+                        motivo = "lista inválida"
+                    else:
+                        meta_extras["vis"][sb_alvo] = [str(x) for x in lista_ids if x]
+                        if "linhas" in op and op["linhas"] is not None:
+                            try:
+                                meta_extras["visLinhas"][sb_alvo] = int(op["linhas"])
+                            except (ValueError, TypeError):
+                                pass
+                        meta_alterada = True
+                        aplicadas += 1
             elif op["t"] == "elenco":
                 mid = op.get("id")
                 if not mid:
@@ -579,10 +624,15 @@ class Handler(BaseHTTPRequestHandler):
                     aco_map.setdefault(dia, {"t1": "", "t2": ""})[turno] = oficial
                     aplicadas += 1
             elif op["t"] == "meta":
-                campos_meta = op.get("campos") or {}
                 if perfil not in ("Admin", "Mestre"):
                     motivo = "meta exige Mestre ou Admin"
                 else:
+                    campos_meta = op.get("campos") or {}
+                    if "statusMes" in campos_meta and campos_meta["statusMes"]:
+                        meta_status = campos_meta["statusMes"]
+                    if "params" in campos_meta and campos_meta["params"] is not None:
+                        meta_params = campos_meta["params"]
+                    meta_alterada = True
                     aplicadas += 1
             else:
                 motivo = f"tipo desconhecido: {op.get('t')}"
@@ -642,7 +692,24 @@ class Handler(BaseHTTPRequestHandler):
             if aco_rows_out:
                 sb_request("POST", "aco_oficiais", body=aco_rows_out)
 
-        json_response(self, {"ok": True, "versao": 1, "aplicadas": aplicadas, "recusadas": recusadas})
+        if meta_alterada:
+            try:
+                sb_request(
+                    "POST", "meta",
+                    body={
+                        "competencia": competencia,
+                        "status": meta_status,
+                        "params_json": meta_params,
+                        "extras_json": meta_extras,
+                        "versao": meta_versao + 1,
+                    },
+                    extra_headers={"Prefer": "resolution=merge-duplicates"},
+                )
+            except Exception:
+                pass
+
+        versao_final = (meta_versao + 1) if meta_alterada else meta_versao
+        json_response(self, {"ok": True, "versao": versao_final, "aplicadas": aplicadas, "recusadas": recusadas})
 
     def _redefinir_pin(self):
         corpo = read_body(self)
