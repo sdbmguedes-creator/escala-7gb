@@ -1,4 +1,21 @@
+# Vercel
 .vercel
-.env*
+.env.local
+.vercelignore
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Backups e snapshots locais
+*.bak
+*.snapshot
 _snapshot/
+*.backup
+
+# Sistema
+.DS_Store
+Thumbs.db
+# Backups locais de versão
+index_v14_OLD.html
