@@ -82,6 +82,10 @@ class Handler(BaseHTTPRequestHandler):
     # ---------- dispatch POST ----------
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path.startswith("/api/"):
+            path = path[len("/api/"):]
+        elif path == "/api":
+            path = ""
 
         rotas = {
             "/setup_inicial": self._setup_inicial,
