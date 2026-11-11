@@ -1,2 +1,0 @@
-# Sem dependências externas obrigatórias: usamos stdlib do Python.
-# O Vercel Python runtime inclui urllib, json, sqlite, etc.
