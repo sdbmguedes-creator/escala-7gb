@@ -53,11 +53,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        path = self.path.split("?")[0]
-        if path == "/" or path == "" or path == "index_v14.html":
-            self._serve_index()
-            return
-        # Qualquer outro GET serve o SPA (favicon, etc. caem aqui)
+        # Qualquer GET (raiz, favicon, etc.) serve o SPA.
         self._serve_index()
 
     # ---------- index ----------
@@ -82,11 +78,27 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- dispatch POST ----------
     def do_POST(self):
+        path_original = self.path
         path = self.path.split("?")[0]
-        if path.startswith("/api/"):
-            path = path[len("/api/"):]
-        elif path == "/api":
+
+        # ------------------------------------------------------------
+        # Normalização tolerante ao roteamento do @vercel/python.
+        # O Vercel pode entregar self.path de várias formas:
+        #   /setup_inicial
+        #   /api/setup_inicial
+        #   /api/app
+        #   /api/app/setup_inicial
+        #   /api/app/
+        # Aqui reduzimos todos ao formato "/<rota>" para bater no dict.
+        # ------------------------------------------------------------
+        if path.startswith("/api/app"):
+            path = path[len("/api/app"):]
+        if path.startswith("/api"):
+            path = path[len("/api"):]
+        if path in ("", "/", "/app", "/app/"):
             path = ""
+        elif not path.startswith("/"):
+            path = "/" + path
 
         rotas = {
             "/setup_inicial": self._setup_inicial,
@@ -105,7 +117,12 @@ class Handler(BaseHTTPRequestHandler):
         if handler:
             handler()
         else:
-            json_response(self, {"ok": False, "erro": "rota nao encontrada"}, 404)
+            json_response(self, {
+                "ok": False,
+                "erro": "rota nao encontrada",
+                "debug_path_recebido": path_original,
+                "debug_path_normalizado": path,
+            }, 404)
 
     # ---------- endpoints ----------
 
@@ -624,8 +641,6 @@ class Handler(BaseHTTPRequestHandler):
 
         json_response(self, {"ok": True, "versao": 1, "aplicadas": aplicadas, "recusadas": recusadas})
 
-
-
     def _redefinir_pin(self):
         corpo = read_body(self)
         u = resolver_token(corpo.get("token", ""))
@@ -659,6 +674,7 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         json_response(self, {"ok": True})
+
 
 # Entry point esperado pelo @vercel/python
 handler = Handler
