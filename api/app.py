@@ -77,9 +77,30 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(corpo)
 
     # ---------- dispatch POST ----------
-    def do_POST(self):
-        path_original = self.path
-        path = self.path.split("?")[0]
+        def do_POST(self):
+        from urllib.parse import urlparse, parse_qs
+        
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+        
+        # Resgata o caminho original que o Vercel separou para nós
+        original_path = query.get("originalPath", [None])[0]
+        if original_path:
+            path = "/" + original_path
+
+        # ------------------------------------------------------------
+        # Normalização (mantida como fallback)
+        # ------------------------------------------------------------
+        if path.startswith("/api/app"):
+            path = path[len("/api/app"):]
+        if path.startswith("/api"):
+            path = path[len("/api"):]
+            
+        if path in ("", "/", "/app", "/app/"):
+            path = ""
+        elif not path.startswith("/"):
+            path = "/" + path
 
         # ------------------------------------------------------------
         # Normalização tolerante ao roteamento do @vercel/python.
