@@ -721,14 +721,8 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "versao": versao_final, "aplicadas": aplicadas, "recusadas": recusadas})
     
         except Exception as e:
-            import traceback
-            erro_detalhado = traceback.format_exc()
-            print(erro_detalhado)  # Para aparecer nos logs do Vercel também
-            json_response(self, {
-                "ok": False, 
-                "erro": str(e), 
-                "traceback": erro_detalhado
-            }, 500)
+            print(f"[push] erro: {e}")
+            json_response(self, {"ok": False, "erro": str(e)}, 500)
 
     def _redefinir_pin(self):
         corpo = read_body(self)
