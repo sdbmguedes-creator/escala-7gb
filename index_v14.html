@@ -1123,7 +1123,7 @@ const Sync = {
   recusadas: null,
 
   iniciar: function(){
-    Sync.ligado = (Transport.disponivel() || Transport.backendDisponivel()) && !!Sessao.token;
+    Sync.ligado = Transport.disponivel() && !!Sessao.token;
     Sync.carregarFila();
     // fila vazia = nada pendente = sincronizado. Sem isso o indicador ficava
     // "offline" para sempre, porque o flush sai cedo quando não há o que enviar.
@@ -5203,72 +5203,51 @@ document.addEventListener("click", e=>{
 
 /* ============================================================================
    F5.3 — TRANSPORTE, SESSÃO E TELA DE PIN
-   Único ponto de contato com o servidor. Sem google.script.run (abrir por
-   file://), o app funciona exatamente como antes: local, sem PIN.
+   Único ponto de contato com o servidor.
+   - http(s):// → usa fetch() para /api/<rota>
+   - file://   → modo local puro (retorna {ok:false, offline:true})
    ========================================================================== */
-var BACKEND_URL = (function(){
-  try{
-    var ls = localStorage.getItem("escala7gb-backend-url");
-    if (ls) return ls;
-  }catch(e){}
-  var m = location.search.match(/[?&]backend=([^&]+)/);
-  if (m) return decodeURIComponent(m[1]);
-  return "https://escala-7gb-two.vercel.app";
-})();
-
-var ENDPOINT_MAP = {
-  apiLogin: "/api/login",
-  apiLogout: "/api/logout",
-  apiBootstrap: "/api/bootstrap",
-  apiPull: "/api/pull",
-  apiPush: "/api/push",
-  apiListarUsuarios: "/api/listar_usuarios",
-  apiCriarUsuario: "/api/criar_usuario",
-  apiRevogarUsuario: "/api/revogar_usuario",
-  apiRedefinirPin: "/api/redefinir_pin",
-  apiEncerrarSessoes: "/api/encerrar_sessoes"
+var ROTAS_API = {
+  apiLogin:            { path: "/api/login",            args: ["pin"] },
+  apiLogout:           { path: "/api/logout",           args: ["token"] },
+  apiBootstrap:        { path: "/api/bootstrap",        args: ["competencia", "token"] },
+  apiPull:             { path: "/api/pull",             args: ["competencia", "token", "desdeVersao"] },
+  apiPush:             { path: "/api/push",             args: ["competencia", "ops", "token"] },
+  apiCriarUsuario:     { path: "/api/criar_usuario",    args: ["token", "nome", "perfil", "pin"] },
+  apiListarUsuarios:   { path: "/api/listar_usuarios",  args: ["token"] },
+  apiRevogarUsuario:   { path: "/api/revogar_usuario",  args: ["token", "nome"] },
+  apiEncerrarSessoes:  { path: "/api/encerrar_sessoes", args: ["token", "nome"] },
+  apiRedefinirPin:     { path: "/api/redefinir_pin",    args: ["token", "nome", "pin"] }
 };
 
 var Transport = {
   disponivel: function(){
-    try{ return !!(window.google && google.script && google.script.run); }catch(e){ return false; }
-  },
-  backendDisponivel: function(){
-    try{ return !!window.fetch; }catch(e){ return false; }
+    try { return location.protocol === "http:" || location.protocol === "https:"; }
+    catch(e){ return false; }
   },
   call: function(nome, args){
     return new Promise(function(resolve, reject){
-      // Apps Script primeiro (producao oficial). Senão cai no backend local.
-      if (Transport.disponivel()){
-        var r = google.script.run
-          .withSuccessHandler(function(res){ resolve(res); })
-          .withFailureHandler(function(err){ reject(err); });
-        if (typeof r[nome] !== "function") return reject(new Error("endpoint inexistente: " + nome));
-        r[nome].apply(r, args || []);
-        return;
+      if (!Transport.disponivel()) return resolve({ ok: false, offline: true });
+      var rota = ROTAS_API[nome];
+      if (!rota){
+        console.error("[transport] rota nao mapeada:", nome);
+        return resolve({ ok: false, erro: "rota nao mapeada: " + nome });
       }
-      if (!Transport.backendDisponivel()) return resolve({ ok: false, offline: true });
-      var path = ENDPOINT_MAP[nome];
-      if (!path) return reject(new Error("endpoint inexistente: " + nome));
       var body = {};
-      if (nome === "apiLogin") body = { pin: args[0] };
-      else if (nome === "apiLogout") body = { token: args[0] };
-      else if (nome === "apiBootstrap") body = { competencia: args[0], token: args[1] };
-      else if (nome === "apiPull") body = { competencia: args[0], token: args[1], desdeVersao: args[2] };
-      else if (nome === "apiPush") body = { competencia: args[0], ops: args[1], token: args[2] };
-      else if (nome === "apiListarUsuarios") body = { token: args[0] };
-      else if (nome === "apiCriarUsuario") body = { token: args[0], nome: args[1], perfil: args[2], pin: args[3] };
-      else if (nome === "apiRevogarUsuario") body = { token: args[0], nome: args[1] };
-      else if (nome === "apiRedefinirPin") body = { token: args[0], nome: args[1], pin: args[2] };
-      else if (nome === "apiEncerrarSessoes") body = { token: args[0], nome: args[1] || null };
-      fetch(BACKEND_URL + path, {
+      var a = args || [];
+      rota.args.forEach(function(k, i){ body[k] = (i < a.length ? a[i] : null); });
+      fetch(rota.path, {
         method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
-      })
-      .then(function(resp){ return resp.json(); })
-      .then(function(res){ resolve(res); })
-      .catch(function(err){ reject(err); });
+      }).then(function(r){
+        return r.text().then(function(txt){
+          var j = {};
+          try { j = JSON.parse(txt); } catch(e){ j = {}; }
+          if (!r.ok && !j.erro) j.erro = "HTTP " + r.status;
+          resolve(j);
+        });
+      }).catch(function(e){ reject(e); });
     });
   }
 };
@@ -5295,7 +5274,7 @@ var Sessao = {
 /* Encerra a sessão: invalida o token NO SERVIDOR e limpa o local.
    Só aparecer quando há backend (botão fica oculto em file://). */
 function sair(){
-  if (!Transport.disponivel() && !Transport.backendDisponivel()) return;
+  if (!Transport.disponivel()) return;
   if (!Sessao.token){ Sessao.limpar(); location.reload(); return; }
   if (!confirm("Sair da sessão neste navegador?")) return;
   Transport.call("apiLogout", [Sessao.token])
@@ -5430,8 +5409,7 @@ function agendarPoll(ym){
 }
 
 async function sincronizarMes(ym){
-  if (!Transport.disponivel() && !Transport.backendDisponivel()) return false;
-  if (!Sessao.token) return false;
+  if (!Transport.disponivel() || !Sessao.token) return false;
 
   var r = await Transport.call("apiPull", [ym, Sessao.token, null]).catch(function(){ return null; });
   if (!r || !r.ok){
@@ -5576,7 +5554,7 @@ function iniciarApp(){
    ========================================================================== */
 (function boot(){
   var mainEl = document.getElementById("main");
-  if (!Transport.disponivel() && !Transport.backendDisponivel()){ iniciarApp(); return; }
+  if (!Transport.disponivel()){ iniciarApp(); return; }
 
   if (mainEl) mainEl.style.visibility = "hidden";
 
