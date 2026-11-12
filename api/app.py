@@ -232,13 +232,7 @@ class Handler(BaseHTTPRequestHandler):
         token = corpo.get("token", "")
         if token:
             try:
-                sb_request(
-                    "POST",
-                    "sessoes",
-                    body={"ativo": False},
-                    extra_headers={"Prefer": f'resolution=merge-duplicates, return=minimal'},
-                )
-                sb_request("DELETE", "sessoes", {"token": token})
+                sb_request("DELETE", "sessoes", params={"token": f"eq.{token}"})
             except Exception:
                 pass
         json_response(self, {"ok": True})
@@ -274,7 +268,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
-            sb_request("DELETE", "usuarios", {"nome": nome})
+            sb_request("DELETE", "usuarios", params={"nome": f"eq.{nome}"})
         except Exception:
             pass
 
@@ -337,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
         sb_request("POST", "usuarios", body={"nome": nome, "ativo": False}, extra_headers={"Prefer": "resolution=merge-duplicates"})
-        sb_request("DELETE", "sessoes", {"nome": nome})
+        sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
 
         json_response(self, {"ok": True})
 
@@ -350,9 +344,9 @@ class Handler(BaseHTTPRequestHandler):
 
         nome = corpo.get("nome")
         if nome:
-            sb_request("DELETE", "sessoes", {"nome": nome})
+            sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
         else:
-            sb_request("DELETE", "sessoes", {})
+            sb_request("DELETE", "sessoes", params={})
 
         json_response(self, {"ok": True})
 
@@ -360,7 +354,6 @@ class Handler(BaseHTTPRequestHandler):
         corpo = read_body(self)
         competencia = corpo.get("competencia", "2026-11")[:7]
         token = corpo.get("token", "")
-        desde = corpo.get("desdeVersao")
 
         u = resolver_token(token)
         if not u:
@@ -371,10 +364,8 @@ class Handler(BaseHTTPRequestHandler):
         versao = meta_rows[0].get("versao", 0) if meta_rows else 0
         extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
 
-        if desde is not None and str(desde) == str(versao):
-            json_response(self, {"ok": True, "versao": versao, "semMudanca": True})
-            return
-
+        # FIX B — nunca retornar payload vazio (semMudanca): frontend pode
+        # sobrescrever estado local com undefined. Retornamos sempre completo.
         marcas = sb_select("marcas", {"competencia": competencia}) or []
         marcas_out = [
             {"g": m["grupo"], "i": m["militar_id"], "d": m["dia"], "c": m["codigo"]}
@@ -408,38 +399,38 @@ class Handler(BaseHTTPRequestHandler):
         mov = sb_select("movimentos", {"competencia": competencia}) or []
         movimentos = [
             {
-                "quando": m["quando"],
-                "tipo": m["tipo"],
-                "origem": m["origem"],
-                "destino": m["destino"],
-                "qtd": m["qtd"],
-                "motivo": m["motivo"],
-                "autor": m["autor"],
+                "quando":   m["quando"],
+                "tipo":     m["tipo"],
+                "origem":   m["origem"],
+                "destino":  m["destino"],
+                "qtd":      m["qtd"],
+                "motivo":   m["motivo"],
+                "autor":    m["autor"],
             }
             for m in mov
         ]
 
         meta = {
             "competencia": competencia,
-            "versao": versao,
-            "status": meta_rows[0].get("status", "ativa") if meta_rows else "ativa",
-            "params": meta_rows[0].get("params_json") if meta_rows else None,
-            "vis": extras.get("vis", {}),
-            "visLinhas": extras.get("visLinhas", {}),
-            "aco": extras.get("aco", []),
+            "versao":      versao,
+            "status":      meta_rows[0].get("status", "ativa") if meta_rows else "ativa",
+            "params":      meta_rows[0].get("params_json") if meta_rows else None,
+            "vis":         extras.get("vis", {}),
+            "visLinhas":   extras.get("visLinhas", {}),
+            "aco":         extras.get("aco", []),
         }
 
         json_response(
             self,
             {
-                "ok": True,
-                "versao": versao,
-                "marcas": marcas_out,
-                "comments": comentarios_out,
-                "elenco": elenco_out,
-                "acoOficiais": aco_oficiais,
-                "movimentos": movimentos,
-                "meta": meta,
+                "ok":            True,
+                "versao":        versao,
+                "marcas":        marcas_out,
+                "comments":      comentarios_out,
+                "elenco":        elenco_out,
+                "acoOficiais":   aco_oficiais,
+                "movimentos":    movimentos,
+                "meta":          meta,
             },
         )
 
@@ -475,7 +466,6 @@ class Handler(BaseHTTPRequestHandler):
             for r in aco_rows:
                 aco_map.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
 
-            # ---- estado de meta/extras (vis, visLinhas, aco, status, params) ----
             meta_rows = sb_select("meta", {"competencia": competencia}) or []
             meta_base = meta_rows[0] if meta_rows else {}
             meta_status = meta_base.get("status", "ativa") or "ativa"
@@ -490,6 +480,16 @@ class Handler(BaseHTTPRequestHandler):
                 meta_extras["aco"] = []
             meta_alterada = False
 
+            # ═══ FIX A — deltas por tabela (upsert + delete pontual) ═══
+            # Só o que ESTE push mudou vai ao banco. Nunca DELETE-all.
+            marcas_upsert    = {}
+            marcas_deletar   = []
+            comments_upsert  = {}
+            comments_deletar = []
+            elenco_upsert    = {}
+            aco_upsert       = {}   # chave: (dia, turno) → oficial
+            # ═══════════════════════════════════════════════════════════
+
             recusadas = []
             aplicadas = 0
             deletadas = 0
@@ -501,6 +501,7 @@ class Handler(BaseHTTPRequestHandler):
                 motivo = ""
                 if not op or not op.get("t"):
                     motivo = "op sem tipo"
+
                 elif op["t"] == "marca":
                     k = op.get("k", "")
                     p = str(k).split("|")
@@ -512,18 +513,25 @@ class Handler(BaseHTTPRequestHandler):
                         if op.get("v") not in (None, ""):
                             marcas_map[k] = {
                                 "competencia": competencia,
-                                "grupo": p[0],
-                                "militar_id": p[1],
-                                "dia": p[2],
-                                "codigo": op["v"],
-                                "ts": agora,
-                                "autor": u["nome"],
+                                "grupo":       p[0],
+                                "militar_id":  p[1],
+                                "dia":         p[2],
+                                "codigo":      op["v"],
+                                "ts":          agora,
+                                "autor":       u["nome"],
                             }
+                            marcas_upsert[k] = marcas_map[k]
+                            if k in marcas_deletar:
+                                marcas_deletar.remove(k)
                         else:
                             if k in marcas_map:
                                 del marcas_map[k]
                                 deletadas += 1
+                            marcas_upsert.pop(k, None)
+                            if k not in marcas_deletar:
+                                marcas_deletar.append(k)
                         aplicadas += 1
+
                 elif op["t"] == "comment":
                     k = op.get("k", "")
                     if not k:
@@ -532,14 +540,21 @@ class Handler(BaseHTTPRequestHandler):
                         if op.get("v") not in (None, ""):
                             comentarios_map[k] = {
                                 "competencia": competencia,
-                                "chave": k,
-                                "texto": op["v"],
-                                "ts": agora,
-                                "autor": u["nome"],
+                                "chave":       k,
+                                "texto":       op["v"],
+                                "ts":          agora,
+                                "autor":       u["nome"],
                             }
+                            comments_upsert[k] = comentarios_map[k]
+                            if k in comments_deletar:
+                                comments_deletar.remove(k)
                         else:
                             comentarios_map.pop(k, None)
+                            comments_upsert.pop(k, None)
+                            if k not in comments_deletar:
+                                comments_deletar.append(k)
                         aplicadas += 1
+
                 elif op["t"] == "aco":
                     aco_add = [x for x in (op.get("add") or []) if x]
                     aco_del = [x for x in (op.get("del") or []) if x]
@@ -563,6 +578,7 @@ class Handler(BaseHTTPRequestHandler):
                         meta_extras["aco"] = atual
                         meta_alterada = True
                         aplicadas += 1
+
                 elif op["t"] == "vis":
                     sb_alvo = op.get("sb", "")
                     if sb_alvo not in SBS_VALIDAS:
@@ -582,26 +598,52 @@ class Handler(BaseHTTPRequestHandler):
                                     pass
                             meta_alterada = True
                             aplicadas += 1
+
                 elif op["t"] == "elenco":
                     mid = op.get("id")
                     if not mid:
                         motivo = "elenco sem id"
                     else:
                         campos = op.get("campos") or {}
-                        base = dict(elenco_map.get(mid, {"competencia": competencia, "militar_id": mid}))
-                        secao_alvo = campos.get("secao") or base.get("secao") or ""
+
+                        # Schema fixo do DB — elimina PGRST102 "All object keys must match"
+                        CAMPOS_ELENCO_DB = {
+                            "competencia": "", "militar_id": "",
+                            "secao": "", "escala": "", "motorista": "", "adm": "",
+                            "restricao": False, "cotas_adm": 0, "afast_json": [],
+                            "escala_origem": "", "escala_origem_adm": "",
+                        }
+                        MAPA_CAMPOS_FRONT = {
+                            "secao": "secao", "escala": "escala",
+                            "motorista": "motorista", "adm": "adm",
+                            "restricao": "restricao",
+                            "cotasAdm": "cotas_adm", "cotas_adm": "cotas_adm",
+                            "afast": "afast_json", "afast_json": "afast_json",
+                            "escalaOrigem": "escala_origem", "escala_origem": "escala_origem",
+                            "escalaOrigemAdm": "escala_origem_adm",
+                            "escala_origem_adm": "escala_origem_adm",
+                        }
+
+                        base = dict(CAMPOS_ELENCO_DB)
+                        base["competencia"] = competencia
+                        base["militar_id"] = mid
+                        if mid in elenco_map:
+                            for k_db, v_db in elenco_map[mid].items():
+                                if k_db in base:
+                                    base[k_db] = v_db
+                        for k_op, v_op in campos.items():
+                            alvo = MAPA_CAMPOS_FRONT.get(k_op)
+                            if alvo:
+                                base[alvo] = v_op if v_op is not None else ([] if alvo == "afast_json" else "")
+
+                        secao_alvo = base.get("secao") or ""
                         if perfil not in ("Admin", "Mestre") and str(secao_alvo) != str(perfil):
                             motivo = f"perfil {perfil} não pode definir elenco de {secao_alvo}"
                         else:
-                            for k2, v in campos.items():
-                                if k2 == "afast":
-                                    base["afast_json"] = v if v is not None else []
-                                else:
-                                    base[k2] = v
-                            base["competencia"] = competencia
-                            base["militar_id"] = mid
                             elenco_map[mid] = base
+                            elenco_upsert[mid] = base
                             aplicadas += 1
+
                 elif op["t"] == "mov":
                     d = op.get("dados") or {}
                     sb_request("POST", "movimentos", body={
@@ -615,6 +657,7 @@ class Handler(BaseHTTPRequestHandler):
                         "autor": d.get("autor") or u["nome"],
                     })
                     aplicadas += 1
+
                 elif op["t"] == "oficial":
                     dia = op.get("dia", "")
                     turno = op.get("turno", "")
@@ -623,7 +666,9 @@ class Handler(BaseHTTPRequestHandler):
                         motivo = "oficial sem dia/turno"
                     else:
                         aco_map.setdefault(dia, {"t1": "", "t2": ""})[turno] = oficial
+                        aco_upsert[(dia, turno)] = oficial
                         aplicadas += 1
+
                 elif op["t"] == "meta":
                     if perfil not in ("Admin", "Mestre"):
                         motivo = "meta exige Mestre ou Admin"
@@ -635,6 +680,7 @@ class Handler(BaseHTTPRequestHandler):
                             meta_params = campos_meta["params"]
                         meta_alterada = True
                         aplicadas += 1
+
                 else:
                     motivo = f"tipo desconhecido: {op.get('t')}"
 
@@ -655,51 +701,70 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
-            try:
-                sb_delete("marcas", {"competencia": competencia})
-            except Exception:
-                pass
-            if marcas_map:
-                sb_request("POST", "marcas", body=list(marcas_map.values()))
+                       # ═══ FIX A — upsert só do delta + delete pontual ═══
+            # IMPORTANTE: on_conflict explícito porque a PK dessas tabelas é 'id',
+            # não a business key. Sem on_conflict, PostgREST resolve pela PK
+            # e o merge-duplicates NÃO ativa → 23505.
+            if marcas_upsert:
+                sb_request(
+                    "POST", "marcas",
+                    body=list(marcas_upsert.values()),
+                    params={"on_conflict": "competencia,grupo,militar_id,dia"},
+                    extra_headers={"Prefer": "resolution=merge-duplicates"},
+                )
+            for k_del in marcas_deletar:
+                partes = str(k_del).split("|")
+                if len(partes) == 3:
+                    sb_request(
+                        "DELETE", "marcas",
+                        params={
+                            "competencia": f"eq.{competencia}",
+                            "grupo":       f"eq.{partes[0]}",
+                            "militar_id":  f"eq.{partes[1]}",
+                            "dia":         f"eq.{partes[2]}",
+                        },
+                    )
 
-            try:
-                sb_delete("comments", {"competencia": competencia})
-            except Exception:
-                pass
-            if comentarios_map:
-                sb_request("POST", "comments", body=list(comentarios_map.values()))
+            if comments_upsert:
+                sb_request(
+                    "POST", "comments",
+                    body=list(comments_upsert.values()),
+                    params={"on_conflict": "competencia,chave"},
+                    extra_headers={"Prefer": "resolution=merge-duplicates"},
+                )
+            for k_del in comments_deletar:
+                sb_request(
+                    "DELETE", "comments",
+                    params={"competencia": f"eq.{competencia}", "chave": f"eq.{k_del}"},
+                )
 
-            try:
-                sb_delete("elenco", {"competencia": competencia})
-            except Exception:
-                pass
-            if elenco_map:
-            
-                # Remove a chave 'id' (que não existe mais no banco) antes de enviar
-                elenco_limpo = []
-                for linha in elenco_map.values():
-                    linha_copia = dict(linha)
-                    linha_copia.pop("id", None)  # Remove o campo 'id' se ele estiver presente
-                    elenco_limpo.append(linha_copia)
-                    
-                sb_request("POST", "elenco", body=elenco_limpo)
+            if elenco_upsert:
+                sb_request(
+                    "POST", "elenco",
+                    body=list(elenco_upsert.values()),
+                    params={"on_conflict": "competencia,militar_id"},  # PK == business key, mas explícito não machuca
+                    extra_headers={"Prefer": "resolution=merge-duplicates"},
+                )
 
-            try:
-                sb_delete("aco_oficiais", {"competencia": competencia})
-            except Exception:
-                pass
-            if aco_map:
+            if aco_upsert:
                 aco_rows_out = []
-                for dia, turnos in aco_map.items():
-                    for turno in ("t1", "t2"):
-                        aco_rows_out.append({
-                            "competencia": competencia,
-                            "dia": dia,
-                            "turno": turno,
-                            "oficial": turnos.get(turno, ""),
-                        })
-                if aco_rows_out:
-                    sb_request("POST", "aco_oficiais", body=aco_rows_out)
+                for (dia, turno), oficial in aco_upsert.items():
+                    aco_rows_out.append({
+                        "competencia": competencia,
+                        "dia": dia, "turno": turno, "oficial": oficial,
+                    })
+                sb_request(
+                    "POST", "aco_oficiais",
+                    body=aco_rows_out,
+                    params={"on_conflict": "competencia,dia,turno"},
+                    extra_headers={"Prefer": "resolution=merge-duplicates"},
+                )
+            # ═══════════════════════════════════════════════════
+
+            # Incrementa versão SEMPRE que algo foi aplicado (para o pull detectar)
+            if aplicadas > 0:
+                meta_alterada = True
+            versao_final = (meta_versao + 1) if meta_alterada else meta_versao
 
             if meta_alterada:
                 try:
@@ -714,12 +779,11 @@ class Handler(BaseHTTPRequestHandler):
                         },
                         extra_headers={"Prefer": "resolution=merge-duplicates"},
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[push/meta] erro: {e}")
 
-            versao_final = (meta_versao + 1) if meta_alterada else meta_versao
             json_response(self, {"ok": True, "versao": versao_final, "aplicadas": aplicadas, "recusadas": recusadas})
-    
+
         except Exception as e:
             print(f"[push] erro: {e}")
             json_response(self, {"ok": False, "erro": str(e)}, 500)
@@ -747,13 +811,14 @@ class Handler(BaseHTTPRequestHandler):
             "POST",
             "usuarios",
             body={
+                "nome": nome,
                 "pin_hash": hash_pin(pin, salt),
                 "salt": salt,
                 "ativo": True,
                 "tentativas": 0,
                 "bloqueado_ate": None,
             },
-            extra_headers={"Prefer": f"resolution=merge-duplicates, update={nome}"},
+            extra_headers={"Prefer": "resolution=merge-duplicates"},
         )
 
         json_response(self, {"ok": True})
