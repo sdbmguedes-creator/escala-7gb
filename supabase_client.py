@@ -42,15 +42,45 @@ def sb_request(method, path, params=None, body=None, extra_headers=None):
 
 
 def sb_select(path, filters=None, order=None, limit=None):
-    params = {}
+    """Busca linhas via PostgREST.
+
+    PostgREST tem limite default de 1000 linhas por requisição (max-rows).
+    Se `limit` for None (sem limite) ou > 1000, pagina automaticamente
+    com offset para buscar TODAS as linhas.
+
+    - limit=None       → pagina até esgotar (retorna tudo)
+    - limit <= 1000    → single request (comportamento antigo)
+    - limit > 1000     → pagina em lotes de 1000 até atingir `limit`
+    """
+    base_params = {}
     if filters:
         for k, v in filters.items():
-            params[k] = f"eq.{v}"
+            base_params[k] = f"eq.{v}"
     if order:
-        params["order"] = order
-    if limit:
-        params["limit"] = str(limit)
-    return sb_request("GET", path, params=params)
+        base_params["order"] = order
+
+    # Limite pequeno explícito — single request
+    if limit is not None and limit <= 1000:
+        base_params["limit"] = str(limit)
+        return sb_request("GET", path, params=base_params)
+
+    # Sem limite OU limite grande — pagina
+    page_size = 1000
+    offset = 0
+    todas = []
+    while True:
+        params = dict(base_params)
+        params["limit"] = str(page_size)
+        params["offset"] = str(offset)
+        lote = sb_request("GET", path, params=params) or []
+        todas.extend(lote)
+        if len(lote) < page_size:
+            break
+        offset += page_size
+        if limit is not None and len(todas) >= limit:
+            todas = todas[:limit]
+            break
+    return todas
 
 
 def sb_upsert(path, rows):

@@ -701,7 +701,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
-                       # ═══ FIX A — upsert só do delta + delete pontual ═══
+            # ═══ FIX A — upsert só do delta + delete pontual ═══
             # IMPORTANTE: on_conflict explícito porque a PK dessas tabelas é 'id',
             # não a business key. Sem on_conflict, PostgREST resolve pela PK
             # e o merge-duplicates NÃO ativa → 23505.
