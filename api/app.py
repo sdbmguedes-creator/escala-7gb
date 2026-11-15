@@ -23,7 +23,20 @@ def resolver_token(token):
         return None
     if not sessoes:
         return None
-    return {"perfil": sessoes[0].get("perfil"), "nome": sessoes[0].get("nome")}
+    s = sessoes[0]
+    expira_str = s.get("expira_em")
+    if expira_str:
+        try:
+            expira = datetime.datetime.fromisoformat(str(expira_str).replace("Z", "+00:00"))
+            if expira.tzinfo is None:
+                expira = expira.replace(tzinfo=datetime.timezone.utc)
+            if expira < datetime.datetime.now(datetime.timezone.utc):
+                return None
+        except (ValueError, TypeError):
+            # Data malformada: fail-open (não bloqueia). _login sempre grava ISO válido,
+            # então na prática isso nunca dispara — só serve de rede de segurança.
+            pass
+    return {"perfil": s.get("perfil"), "nome": s.get("nome")}
 
 
 def pode_gravar(perfil, grupo, militar_id, elenco_map):
@@ -172,6 +185,21 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             n = 0
 
+         # Reset por inatividade: se a última tentativa foi > JANELA_MIN atrás,
+        # o contador zera. Evita bloqueio permanente após 10 erros.
+        try:
+            ult_rows = sb_select("propriedades", {"chave": "LOGIN_ULTIMA_TENTATIVA"})
+            if ult_rows and ult_rows[0].get("valor"):
+                ult = datetime.datetime.fromisoformat(
+                    str(ult_rows[0]["valor"]).replace("Z", "+00:00"))
+                if ult.tzinfo is None:
+                    ult = ult.replace(tzinfo=datetime.timezone.utc)
+                if (datetime.datetime.now(datetime.timezone.utc) - ult).total_seconds() > JANELA_MIN * 60:
+                    n = 0
+        except Exception:
+            pass
+
+
         if n >= 10:
             json_response(
                 self, {"ok": False, "erro": "bloqueado por muitas tentativas (tente daqui a alguns minutos)"}, 403
@@ -194,6 +222,14 @@ class Handler(BaseHTTPRequestHandler):
                     body={"chave": "LOGIN_TENTATIVAS", "valor": str(novo_n)},
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
+
+                sb_request(
+                        "POST",
+                        "propriedades",
+                        body={"chave": "LOGIN_ULTIMA_TENTATIVA",
+                            "valor": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+                        extra_headers={"Prefer": "resolution=merge-duplicates"},
+                    )
             except Exception:
                 pass
             json_response(
@@ -210,6 +246,14 @@ class Handler(BaseHTTPRequestHandler):
                 body={"chave": "LOGIN_TENTATIVAS", "valor": "0"},
                 extra_headers={"Prefer": "resolution=merge-duplicates"},
             )
+            sb_request(
+                "POST",
+                "propriedades",
+                body={"chave": "LOGIN_ULTIMA_TENTATIVA",
+                      "valor": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+                extra_headers={"Prefer": "resolution=merge-duplicates"},
+            )
+            
         except Exception:
             pass
 
@@ -273,6 +317,8 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
         salt = uuid.uuid4().hex
+        # PK é 'nome' — merge-duplicates implícito resolve sem on_conflict.
+        # Upsert evita janela onde DELETE sucesso + POST falha = usuário some.
         sb_request("POST", "usuarios", body={
             "nome": nome,
             "perfil": perfil,
@@ -281,7 +327,13 @@ class Handler(BaseHTTPRequestHandler):
             "ativo": True,
             "tentativas": 0,
             "bloqueado_ate": None,
-        })
+        }, extra_headers={"Prefer": "resolution=merge-duplicates"})
+
+        # Invalida sessões antigas (perfil pode ter mudado; demotion efetiva)
+        try:
+            sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
+        except Exception:
+            pass
 
         json_response(self, {"ok": True, "nome": nome, "perfil": perfil, "pin": pin})
 
