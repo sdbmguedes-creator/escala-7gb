@@ -225,7 +225,30 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
 <main id="main"></main>
 <div id="menu"></div>
 <div id="toast" aria-live="polite"></div>
+
 <script>
+// Interceptador Global de Fetch: Auto-logout em caso de token inválido/expirado (401)
+(function() {
+  const originalFetch = window.fetch;
+  let _sessaoExpiradaAviso = false;
+  
+  window.fetch = async function(...args) {
+    const res = await originalFetch.apply(this, args);
+    const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || "";
+    
+    // Se retornar 401 E NÃO for a rota de login (onde 401 = senha errada)
+    if (res.status === 401 && url && !url.includes('/login')) {
+      if (!_sessaoExpiradaAviso) {
+        _sessaoExpiradaAviso = true;
+        try { localStorage.removeItem('escala7gb-sessao'); } catch(e){}
+        alert("Sua sessão expirou ou foi encerrada. Faça login novamente.");
+        window.location.reload();
+      }
+    }
+    return res;
+  };
+})();
+
 var BUILD_APP = "v14-2026-11-11";
 
 // ===== 1. CONSTANTES E DADOS BASE =====
