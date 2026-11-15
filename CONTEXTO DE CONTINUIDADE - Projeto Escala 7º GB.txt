@@ -1,0 +1,154 @@
+CONTEXTO DE CONTINUIDADE — Projeto Escala 7º GB / CBMPE
+Atualizado: 2026-11-15
+
+═══════════════════════════════════════════════════════════════════════════════
+1) IDENTIDADE E ARQUITETURA
+═══════════════════════════════════════════════════════════════════════════════
+
+- Frontend: SPA single-file (index_v14.html), sem build, HTML+CSS+JS inline
+- Backend: Python serverless no Vercel (api/app.py, classe Handler)
+- Banco: PostgreSQL no Supabase (REST API via PostgREST)
+- Auth: PIN 6 dígitos → Token de sessão (30 dias)
+- Repositório: https://github.com/sdbmguedes-creator/escala-7gb (branch main)
+- URL Produção: https://escala-7gb.vercel.app
+- Pasta Local: D:\CLAUDE_APP\projeto-escala-supabase
+- Shell: Windows PowerShell 5.1 (⚠️ NÃO usar Set-Content em arquivos com acentos — corrompe UTF-8; usar VS Code)
+
+⚠️ ATENÇÃO — MÚLTIPLOS PROJETOS SUPABASE
+   O SQL Editor às vezes abre no projeto ERRADO. SEMPRE confirmar:
+     SELECT current_database(), current_schema();
+   O projeto correto tem URL = SUPABASE_URL da Vercel (Settings → Env Vars).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+2) DECISÕES TÉCNICAS (NÃO REVERTER)
+═══════════════════════════════════════════════════════════════════════════════
+
+- Matrículas como TEXT: contêm hífen (ex: 798041-8). NUNCA converter para bigint.
+
+- elenco: PK composta (competencia, militar_id). Sem coluna 'id' (removida).
+
+- marcas / comments / aco_oficiais: PK é 'id' (bigint auto-increment), mas
+  a business key é UNIQUE:
+    marcas:        UNIQUE(competencia, grupo, militar_id, dia)
+    comments:      UNIQUE(competencia, chave)
+    aco_oficiais:  UNIQUE(competencia, dia, turno)
+  → upsert precisa de params={"on_conflict":"..."} explícito. Sem isso,
+    PostgREST resolve pela PK e o merge-duplicates NÃO ativa (erro 23505).
+
+- meta: PK = competencia. Upsert padrão funciona sem on_conflict.
+
+- usuarios: PK = nome. Upsert padrão funciona (merge-duplicates implícito).
+
+- Frontend camelCase nas chaves JSON. Backend snake_case interno.
+  O pull DEVE retornar "acoOficiais" (camelCase), NÃO "aco_oficiais".
+  Variáveis Python podem ser snake_case — só a chave JSON importa.
+
+- PostgREST trunca em 1000 linhas/req. sb_select agora PAGINA automaticamente
+  com offset quando limit=None ou limit>1000. NÃO remover essa paginação —
+  com >1000 marcas o pull trunca silenciosamente (bug de 160 marcas invisíveis).
+
+- Frontend aplicarRemoto:
+    marks = remoto.marks;  ← SEM GUARDA, intencional (server é fonte)
+    outros campos com `if (Object.keys(...).length)`  ← guard defensivo
+  NÃO "consertar" marks para merge — design server-soberano é intencional.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+3) FIXES CRÍTICOS APLICADOS E VALIDADOS EM PRODUÇÃO
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ FIX A — _push delta upsert (crítico, multi-dispositivo)
+   Bug original: "DELETE-all + INSERT-all" apagava tudo em cada push,
+   perdendo dados de outros dispositivos (bug de perda total de marcas).
+   Correção:
+   - marcas_upsert/marcas_deletar + equivalentes p/ comments, elenco, aco
+   - Cada op atualiza só o delta
+   - on_conflict explícito nos 4 upserts
+   - Bump de versão sempre que aplicadas > 0
+
+✅ FIX B — _pull sempre completo (crítico)
+   Removido {semMudanca: true} que retornava payload vazio (frontend
+   podia sobrescrever estado com undefined). Sempre retorna:
+   marcas, comments, elenco, acoOficiais (camelCase!), movimentos, meta.
+
+✅ FIX C — sb_select com paginação (crítico)
+   PostgREST limitava a 1000 linhas. Com 1160+ no banco, o pull só trazia
+   1000 (160 invisíveis). Agora pagina com offset até esgotar.
+
+✅ FIX D — poll não reaplica/loga quando versão não muda (18f14ed)
+   Backend (FIX B) passou a sempre retornar payload completo → o guard
+   `r.semMudanca` em atualizarDoServidor nunca é truthy → reaplicava e
+   logava a cada 5s mesmo sem mudança. Guard novo:
+       if (_ultimaRemota > 0 && r.versao === versaoAntes) return;
+   `_ultimaRemota > 0` preserva o pull inicial quando cliente e servidor
+   estão ambos em versao 0 (recém-inicializado).
+
+✅ _redefinir_pin — VALIDADO empiricamente
+   PK de usuarios é 'nome', então merge-duplicates resolve sem on_conflict.
+   Testado: TESTE_PIN com 111111 → redefinir p/ 222222 → login funcionou.
+
+✅ Endpoints corrigidos (DELETE com params em vez de body):
+   - _logout
+   - _revogar_usuario
+   - _encerrar_sessoes
+
+
+═══════════════════════════════════════════════════════════════════════════════
+4) ESTRUTURA DE ARQUIVOS
+═══════════════════════════════════════════════════════════════════════════════
+
+- index_v14.html          Frontend completo (SPA)
+- api/app.py              Backend Vercel (classe Handler)
+- supabase_client.py      sb_select, sb_request, sb_upsert, sb_delete
+- utils.py                json_response, read_body
+- vercel.json             Rewrites
+- .gitignore              *.bak, backups*/ trecho_*.txt, escala-*-OK_SYNC.json
+
+
+═══════════════════════════════════════════════════════════════════════════════
+5) BACKLOG — PRÓXIMOS PASSOS (nenhum crítico)
+═══════════════════════════════════════════════════════════════════════════════
+
+🟢 COSMÉTICO
+   (nenhum item pendente — o batch de 2026-11-15 resolveu os 2 anteriores;
+   ver FIX D na seção 3)
+
+🟢 EVOLUÇÃO
+   - Controle de concorrência otimista no _push (versao_esperada / merge
+     por ts). Hoje dois devices editando a MESMA marca no mesmo segundo:
+     last-write-wins. Aceitável, mas pode evoluir.
+   - Auditoria de segurança (pode_gravar, rate limit login, expiração sessão).
+   - Documentação do usuário (manual rápido).
+   - Novas features: relatórios PDF/CSV, notificações, audit log, PWA, etc.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+6) COMANDOS ÚTEIS
+═══════════════════════════════════════════════════════════════════════════════
+
+# Sintaxe Python
+python -c "import ast; ast.parse(open('api/app.py', encoding='utf-8').read()); print('OK')"
+
+# Deploy (automático no push da main)
+git add . ; git commit -m "..." ; git push origin main
+
+# Diagnóstico no console do browser (F12)
+__sync                                     // {versao, marcas, ...}
+Object.keys(marks).length                  // contagem local
+JSON.parse(localStorage.getItem('escala7gb-fila') || '[]').length  // ops pendentes
+JSON.parse(localStorage.getItem('escala7gb-sessao')).token         // token
+JSON.parse(localStorage.getItem('escala7gb-fila') || '[]')         // fila pendente
+
+
+═══════════════════════════════════════════════════════════════════════════════
+7) LIÇÕES APRENDIDAS
+═══════════════════════════════════════════════════════════════════════════════
+
+- Não confiar em "deve ser cache" — investigar sempre.
+- Múltiplos projetos Supabase = confusão. Confirmar current_database() antes.
+- PostgREST trunca em 1000 sem aviso. Paginação obrigatória.
+- on_conflict explícito quando PK ≠ business key.
+- "Server é fonte das marcas" (marks = remoto.marks sem guard) é design, não bug.
+- Backup antes de mudanças em produção. Sempre.
+- Editar arquivos Python com VS Code, não com PowerShell Set-Content.
