@@ -711,15 +711,18 @@ class Handler(BaseHTTPRequestHandler):
                     aplicadas += 1
 
                 elif op["t"] == "oficial":
-                    dia = op.get("dia", "")
-                    turno = op.get("turno", "")
-                    oficial = op.get("v", "") or ""
-                    if not dia or not turno:
-                        motivo = "oficial sem dia/turno"
+                    if perfil not in ("Admin", "Mestre"):
+                        motivo = "oficial exige Admin ou Mestre"
                     else:
-                        aco_map.setdefault(dia, {"t1": "", "t2": ""})[turno] = oficial
-                        aco_upsert[(dia, turno)] = oficial
-                        aplicadas += 1
+                        dia = op.get("dia", "")
+                        turno = op.get("turno", "")
+                        oficial = op.get("v", "") or ""
+                        if not dia or not turno:
+                            motivo = "oficial sem dia/turno"
+                        else:
+                            aco_map.setdefault(dia, {"t1": "", "t2": ""})[turno] = oficial
+                            aco_upsert[(dia, turno)] = oficial
+                            aplicadas += 1
 
                 elif op["t"] == "meta":
                     if perfil not in ("Admin", "Mestre"):
