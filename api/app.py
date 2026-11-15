@@ -767,14 +767,6 @@ class Handler(BaseHTTPRequestHandler):
                     params={"on_conflict": "competencia,grupo,militar_id,dia"},
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
-
-                 # Invalida sessões antigas (o PIN mudou; quem estava logado com o antigo cai)
-                try:
-                    sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
-                except Exception:
-                    pass
-
-                json_response(self, {"ok": True})
                 
             for k_del in marcas_deletar:
                 partes = str(k_del).split("|")
@@ -885,6 +877,13 @@ class Handler(BaseHTTPRequestHandler):
             extra_headers={"Prefer": "resolution=merge-duplicates"},
         )
 
+         # Invalida sessões antigas (o PIN mudou; quem estava logado com o antigo cai)
+        try:
+            sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
+        except Exception:
+            pass
+
+        
         json_response(self, {"ok": True})
 
 
