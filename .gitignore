@@ -17,8 +17,17 @@ _snapshot/
 # Sistema
 .DS_Store
 Thumbs.db
-# Backups locais de versão
+# Backups locais de versï¿½o
 index_v14_OLD.html
 
-# Backups locais de versão
+# Backups locais de versï¿½o
 index_v14_OLD.html
+
+# Backups e arquivos temporÃ¡rios locais
+*.bak
+*.bak_*
+backups2026_11/
+backups*/
+trecho_*.txt
+escala-*-OK_SYNC.json
+de dispatch*
