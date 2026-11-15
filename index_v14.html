@@ -5385,8 +5385,14 @@ async function atualizarDoServidor(ym){
   if (Sync.fila.length) return;
   if (Date.now() - _ultimaInteracao < 3000) return;
 
+  var versaoAntes = Sync.versao;
   var r = await Transport.call("apiPull", [ym, Sessao.token, Sync.versao]).catch(function(){ return null; });
   if (!r || !r.ok || r.semMudanca || !r.marcas) return;
+  // Se já aplicamos algo nesta sessão E a versão não mudou, não há
+  // nada de novo: pula aplicar + log (evita o spam de 5s).
+  // _ultimaRemota = 0 só na 1ª vez desde o load, garantindo o pull inicial
+  // mesmo quando servidor e cliente estão ambos em versao 0.
+  if (_ultimaRemota > 0 && r.versao === versaoAntes) return;
 
   aplicarRemoto(estadoDoServidor(r), ym);
   Sync.versao = r.versao;
