@@ -210,6 +210,7 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
     <select id="perfilGlobal" title="Perfil de edição">
       <option>Admin</option><option>Mestre</option><option>1ªSB</option><option>2ªSB</option><option>3ªSB</option><option>4ªSB</option>
     </select>
+    <span id="lblNomeUsuario" style="color:#fff; font-size:12px; margin-left:8px; font-weight:600; opacity:0.9;"></span>
   </span>
   <span class="acoes">
     <button onclick="salvar()">Salvar</button>
@@ -5594,6 +5595,17 @@ function iniciarApp(){
     iniciarApp();
     if (mainEl) mainEl.style.visibility = "";
     atualizarBotaoSair();
+    var lblNome = document.getElementById("lblNomeUsuario");
+    if (lblNome && Sessao.nome) lblNome.textContent = Sessao.nome;
+    if (Sessao.perfil && Sessao.perfil !== "Admin" && Sessao.perfil !== "Mestre") {
+      setTimeout(() => {
+        document.querySelectorAll('nav button').forEach(btn => {
+          if (btn.textContent.trim().toLowerCase() === "militares") {
+            btn.style.display = "none";
+          }
+        });
+      }, 100);
+    }
     if (location.search.indexOf("testes=1") >= 0) setTimeout(rodarTestesCliente, 400);
   }
 

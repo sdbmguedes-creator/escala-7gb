@@ -652,63 +652,69 @@ class Handler(BaseHTTPRequestHandler):
                             aplicadas += 1
 
                 elif op["t"] == "elenco":
-                    mid = op.get("id")
-                    if not mid:
-                        motivo = "elenco sem id"
+                    if perfil not in ("Admin", "Mestre"):
+                        motivo = "elenco exige Admin ou Mestre"
                     else:
-                        campos = op.get("campos") or {}
-
-                        # Schema fixo do DB — elimina PGRST102 "All object keys must match"
-                        CAMPOS_ELENCO_DB = {
-                            "competencia": "", "militar_id": "",
-                            "secao": "", "escala": "", "motorista": "", "adm": "",
-                            "restricao": False, "cotas_adm": 0, "afast_json": [],
-                            "escala_origem": "", "escala_origem_adm": "",
-                        }
-                        MAPA_CAMPOS_FRONT = {
-                            "secao": "secao", "escala": "escala",
-                            "motorista": "motorista", "adm": "adm",
-                            "restricao": "restricao",
-                            "cotasAdm": "cotas_adm", "cotas_adm": "cotas_adm",
-                            "afast": "afast_json", "afast_json": "afast_json",
-                            "escalaOrigem": "escala_origem", "escala_origem": "escala_origem",
-                            "escalaOrigemAdm": "escala_origem_adm",
-                            "escala_origem_adm": "escala_origem_adm",
-                        }
-
-                        base = dict(CAMPOS_ELENCO_DB)
-                        base["competencia"] = competencia
-                        base["militar_id"] = mid
-                        if mid in elenco_map:
-                            for k_db, v_db in elenco_map[mid].items():
-                                if k_db in base:
-                                    base[k_db] = v_db
-                        for k_op, v_op in campos.items():
-                            alvo = MAPA_CAMPOS_FRONT.get(k_op)
-                            if alvo:
-                                base[alvo] = v_op if v_op is not None else ([] if alvo == "afast_json" else "")
-
-                        secao_alvo = base.get("secao") or ""
-                        if perfil not in ("Admin", "Mestre") and str(secao_alvo) != str(perfil):
-                            motivo = f"perfil {perfil} não pode definir elenco de {secao_alvo}"
+                        mid = op.get("id")
+                        if not mid:
+                            motivo = "elenco sem id"
                         else:
-                            elenco_map[mid] = base
-                            elenco_upsert[mid] = base
-                            aplicadas += 1
+                            campos = op.get("campos") or {}
+
+                            # Schema fixo do DB — elimina PGRST102 "All object keys must match"
+                            CAMPOS_ELENCO_DB = {
+                                "competencia": "", "militar_id": "",
+                                "secao": "", "escala": "", "motorista": "", "adm": "",
+                                "restricao": False, "cotas_adm": 0, "afast_json": [],
+                                "escala_origem": "", "escala_origem_adm": "",
+                            }
+                            MAPA_CAMPOS_FRONT = {
+                                "secao": "secao", "escala": "escala",
+                                "motorista": "motorista", "adm": "adm",
+                                "restricao": "restricao",
+                                "cotasAdm": "cotas_adm", "cotas_adm": "cotas_adm",
+                                "afast": "afast_json", "afast_json": "afast_json",
+                                "escalaOrigem": "escala_origem", "escala_origem": "escala_origem",
+                                "escalaOrigemAdm": "escala_origem_adm",
+                                "escala_origem_adm": "escala_origem_adm",
+                            }
+
+                            base = dict(CAMPOS_ELENCO_DB)
+                            base["competencia"] = competencia
+                            base["militar_id"] = mid
+                            if mid in elenco_map:
+                                for k_db, v_db in elenco_map[mid].items():
+                                    if k_db in base:
+                                        base[k_db] = v_db
+                            for k_op, v_op in campos.items():
+                                alvo = MAPA_CAMPOS_FRONT.get(k_op)
+                                if alvo:
+                                    base[alvo] = v_op if v_op is not None else ([] if alvo == "afast_json" else "")
+
+                            secao_alvo = base.get("secao") or ""
+                            if perfil not in ("Admin", "Mestre") and str(secao_alvo) != str(perfil):
+                                motivo = f"perfil {perfil} não pode definir elenco de {secao_alvo}"
+                            else:
+                                elenco_map[mid] = base
+                                elenco_upsert[mid] = base
+                                aplicadas += 1
 
                 elif op["t"] == "mov":
-                    d = op.get("dados") or {}
-                    sb_request("POST", "movimentos", body={
-                        "competencia": competencia,
-                        "quando": d.get("quando", ""),
-                        "tipo": d.get("tipo", ""),
-                        "origem": d.get("origem", ""),
-                        "destino": d.get("destino", ""),
-                        "qtd": d.get("qtd", 0),
-                        "motivo": d.get("motivo", ""),
-                        "autor": d.get("autor") or u["nome"],
-                    })
-                    aplicadas += 1
+                    if perfil not in ("Admin", "Mestre"):
+                        motivo = "mov exige Admin ou Mestre"
+                    else:
+                        d = op.get("dados") or {}
+                        sb_request("POST", "movimentos", body={
+                            "competencia": competencia,
+                            "quando": d.get("quando", ""),
+                            "tipo": d.get("tipo", ""),
+                            "origem": d.get("origem", ""),
+                            "destino": d.get("destino", ""),
+                            "qtd": d.get("qtd", 0),
+                            "motivo": d.get("motivo", ""),
+                            "autor": u["nome"],
+                        })
+                        aplicadas += 1
 
                 elif op["t"] == "oficial":
                     if perfil not in ("Admin", "Mestre"):
