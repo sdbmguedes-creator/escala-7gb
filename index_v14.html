@@ -5600,11 +5600,21 @@ function iniciarApp(){
     if (Sessao.perfil && Sessao.perfil !== "Admin" && Sessao.perfil !== "Mestre") {
       setTimeout(() => {
         document.querySelectorAll('nav button').forEach(btn => {
-          if (btn.textContent.trim().toLowerCase() === "militares") {
+          if (btn.textContent.trim().toLowerCase() === "militares" || btn.textContent.trim().toLowerCase() === "auditoria") {
             btn.style.display = "none";
           }
         });
       }, 100);
+    } else {
+      // Adiciona o botão de Auditoria dinamicamente para Admin/Mestre
+      const nav = document.getElementById('nav');
+      if (nav && !document.getElementById('btnAuditoria')) {
+        const btn = document.createElement('button');
+        btn.id = 'btnAuditoria';
+        btn.textContent = 'Auditoria';
+        btn.onclick = abrirAuditoria;
+        nav.appendChild(btn);
+      }
     }
     if (location.search.indexOf("testes=1") >= 0) setTimeout(rodarTestesCliente, 400);
   }
@@ -5633,6 +5643,58 @@ function iniciarApp(){
     })
     .catch(function(){ entrar(); });   // falha de rede: não trava o app
 })();
+
+async function abrirAuditoria() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div style="padding:20px;text-align:center;">Carregando auditoria...</div>';
+  
+  // Remove active de todos os botões do nav e marca o Auditoria
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  const btnA = document.getElementById('btnAuditoria');
+  if (btnA) btnA.classList.add('active');
+
+  try {
+    const res = await fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: Sessao.token })
+    });
+    
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.erro || "Erro ao carregar");
+
+    let html = '<div style="padding:16px; max-width:1000px; margin:0 auto;">';
+    html += '<h2 style="color:#1f3b5c;margin-bottom:16px;">Logs de Acesso (Últimos 200)</h2>';
+    html += '<table class="milTable" style="width:100%; border-collapse:collapse;">';
+    html += '<thead><tr><th>Data/Hora</th><th>Usuário</th><th>Perfil</th><th>Ação</th><th>Detalhes</th></tr></thead><tbody>';
+
+    (data.logs || []).forEach(log => {
+      // Formata a data ISO (ts) para o padrão brasileiro
+      const dt = new Date(log.ts);
+      const dataFmt = dt.toLocaleString('pt-BR');
+      
+      // Cor da ação
+      let corAcao = '#212529';
+      if (log.acao === 'login') corAcao = '#198754';
+      if (log.acao === 'logout') corAcao = '#6c757d';
+      if (log.acao === 'revogado' || log.acao === 'logout_forcado') corAcao = '#dc3545';
+
+      html += `<tr>
+        <td style="white-space:nowrap">${dataFmt}</td>
+        <td><strong>${log.nome}</strong></td>
+        <td>${log.perfil}</td>
+        <td style="color:${corAcao}; font-weight:600; text-transform:uppercase; font-size:11px;">${log.acao}</td>
+        <td style="font-size:11px; color:#6c757d">${log.detalhes || ''}</td>
+      </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    main.innerHTML = html;
+
+  } catch (e) {
+    main.innerHTML = `<div style="padding:20px;color:#dc3545;">Erro ao carregar logs: ${e.message}</div>`;
+  }
+}
 
 </script>
 

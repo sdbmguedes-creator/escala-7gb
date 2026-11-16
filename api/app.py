@@ -14,6 +14,19 @@ def hash_pin(pin, salt):
     return hashlib.sha256((salt + str(pin)).encode("utf-8")).hexdigest()
 
 
+def registrar_log(nome, perfil, acao, detalhes=""):
+    """Grava um log de auditoria. Silencioso em caso de erro para não travar o fluxo."""
+    try:
+        sb_request("POST", "logs_acesso", body={
+            "nome": nome,
+            "perfil": perfil,
+            "acao": acao,
+            "detalhes": detalhes
+        })
+    except Exception as e:
+        print(f"[log_error] {e}")
+
+
 def resolver_token(token):
     if not token:
         return None
@@ -122,6 +135,7 @@ class Handler(BaseHTTPRequestHandler):
             "/pull": self._pull,
             "/push": self._push,
             "/redefinir_pin": self._redefinir_pin,
+            "/logs": self._get_logs,
         }
 
         handler = rotas.get(path)
@@ -267,6 +281,8 @@ class Handler(BaseHTTPRequestHandler):
             "ativo": True,
         })
 
+        registrar_log(alvo["nome"], alvo["perfil"], "login")
+
         json_response(
             self, {"ok": True, "token": token, "perfil": alvo["perfil"], "nome": alvo["nome"]}
         )
@@ -275,6 +291,9 @@ class Handler(BaseHTTPRequestHandler):
         corpo = read_body(self)
         token = corpo.get("token", "")
         if token:
+            u = resolver_token(token)
+            if u:
+                registrar_log(u["nome"], u["perfil"], "logout")
             try:
                 sb_request("DELETE", "sessoes", params={"token": f"eq.{token}"})
             except Exception:
@@ -385,6 +404,8 @@ class Handler(BaseHTTPRequestHandler):
         sb_request("POST", "usuarios", body={"nome": nome, "ativo": False}, extra_headers={"Prefer": "resolution=merge-duplicates"})
         sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
 
+        registrar_log(u["nome"], u["perfil"], "revogado", f"Alvo: {nome}")
+
         json_response(self, {"ok": True})
 
     def _encerrar_sessoes(self):
@@ -397,8 +418,10 @@ class Handler(BaseHTTPRequestHandler):
         nome = corpo.get("nome")
         if nome:
             sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
+            registrar_log(u["nome"], u["perfil"], "logout_forcado", f"Alvo: {nome}")
         else:
             sb_request("DELETE", "sessoes", params={})
+            registrar_log(u["nome"], u["perfil"], "logout_forcado", "Todos os usuários")
 
         json_response(self, {"ok": True})
 
@@ -891,6 +914,20 @@ class Handler(BaseHTTPRequestHandler):
 
         
         json_response(self, {"ok": True})
+
+    def _get_logs(self):
+        corpo = read_body(self)
+        u = resolver_token(corpo.get("token", ""))
+        if not u or u["perfil"] not in ("Admin", "Mestre"):
+            json_response(self, {"ok": False, "erro": "não autorizado"}, 403)
+            return
+
+        try:
+            # Busca os 200 logs mais recentes (ordem decrescente)
+            logs = sb_select("logs_acesso", order="ts.desc", limit=200) or []
+            json_response(self, {"ok": True, "logs": logs})
+        except Exception as e:
+            json_response(self, {"ok": False, "erro": str(e)}, 500)
 
 
 # Entry point esperado pelo @vercel/python
