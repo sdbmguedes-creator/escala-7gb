@@ -8,11 +8,11 @@ Atualizado: 2026-11-15
 - Frontend: SPA single-file (index_v14.html), sem build, HTML+CSS+JS inline
 - Backend: Python serverless no Vercel (api/app.py, classe Handler)
 - Banco: PostgreSQL no Supabase (REST API via PostgREST)
-- Auth: PIN 6 dígitos → Token de sessão (30 dias)
+- Auth: PIN 6 dígitos → Token de sessão (30 dias, agora validado no backend)
 - Repositório: https://github.com/sdbmguedes-creator/escala-7gb (branch main)
 - URL Produção: https://escala-7gb.vercel.app
 - Pasta Local: D:\CLAUDE_APP\projeto-escala-supabase
-- Shell: Windows PowerShell 5.1 (⚠️ NÃO usar Set-Content em arquivos com acentos — corrompe UTF-8; usar VS Code)
+- Shell: Windows PowerShell 5.1 (⚠️ NÃO usar Set-Content em arquivos com acentos; usar VS Code)
 
 ⚠️ ATENÇÃO — MÚLTIPLOS PROJETOS SUPABASE
    O SQL Editor às vezes abre no projeto ERRADO. SEMPRE confirmar:
@@ -37,8 +37,10 @@ Atualizado: 2026-11-15
     PostgREST resolve pela PK e o merge-duplicates NÃO ativa (erro 23505).
 
 - meta: PK = competencia. Upsert padrão funciona sem on_conflict.
-
 - usuarios: PK = nome. Upsert padrão funciona (merge-duplicates implícito).
+
+- logs_acesso: PK = id (bigint auto-increment). Inserção simples via POST
+  (não usa upsert). Tem índice DESC na coluna 'ts' para busca rápida.
 
 - Frontend camelCase nas chaves JSON. Backend snake_case interno.
   O pull DEVE retornar "acoOficiais" (camelCase), NÃO "aco_oficiais".
@@ -55,43 +57,60 @@ Atualizado: 2026-11-15
 
 
 ═══════════════════════════════════════════════════════════════════════════════
-3) FIXES CRÍTICOS APLICADOS E VALIDADOS EM PRODUÇÃO
+3) FIXES CRÍTICOS E AUDITORIA DE SEGURANÇA (APLICADOS E VALIDADOS)
 ═══════════════════════════════════════════════════════════════════════════════
 
 ✅ FIX A — _push delta upsert (crítico, multi-dispositivo)
-   Bug original: "DELETE-all + INSERT-all" apagava tudo em cada push,
-   perdendo dados de outros dispositivos (bug de perda total de marcas).
-   Correção:
-   - marcas_upsert/marcas_deletar + equivalentes p/ comments, elenco, aco
-   - Cada op atualiza só o delta
-   - on_conflict explícito nos 4 upserts
-   - Bump de versão sempre que aplicadas > 0
+   Bug original: "DELETE-all + INSERT-all" apagava tudo em cada push.
+   Correção: marcas_upsert/marcas_deletar + equivalentes p/ comments, elenco, aco.
+   on_conflict explícito nos 4 upserts. Bump de versão sempre que aplicadas > 0.
 
 ✅ FIX B — _pull sempre completo (crítico)
-   Removido {semMudanca: true} que retornava payload vazio (frontend
-   podia sobrescrever estado com undefined). Sempre retorna:
-   marcas, comments, elenco, acoOficiais (camelCase!), movimentos, meta.
+   Removido {semMudanca: true} que retornava payload vazio.
+   Sempre retorna: marcas, comments, elenco, acoOficiais, movimentos, meta.
 
 ✅ FIX C — sb_select com paginação (crítico)
-   PostgREST limitava a 1000 linhas. Com 1160+ no banco, o pull só trazia
-   1000 (160 invisíveis). Agora pagina com offset até esgotar.
+   PostgREST limitava a 1000 linhas. Agora pagina com offset até esgotar.
 
-✅ FIX D — poll não reaplica/loga quando versão não muda (18f14ed)
-   Backend (FIX B) passou a sempre retornar payload completo → o guard
-   `r.semMudanca` em atualizarDoServidor nunca é truthy → reaplicava e
-   logava a cada 5s mesmo sem mudança. Guard novo:
-       if (_ultimaRemota > 0 && r.versao === versaoAntes) return;
-   `_ultimaRemota > 0` preserva o pull inicial quando cliente e servidor
-   estão ambos em versao 0 (recém-inicializado).
+✅ FIX D — poll não reaplica/loga quando versão não muda
+   Guard no atualizarDoServidor: if (_ultimaRemota > 0 && r.versao === versaoAntes) return;
+
+✅ FIX E — resolver_token valida expira_em
+   Antes só checava ativo=true. Agora checa expira_em < agora (fail-safe).
+   Sessões > 30 dias são rejeitadas.
+
+✅ FIX F — login rate limit com janela de 15 min
+   Nova chave LOGIN_ULTIMA_TENTATIVA. Se última tentativa > 15min atrás, 
+   contador zera. Acabou o bloqueio permanente (DoS) do login.
+
+✅ FIX G — _criar_usuario e _redefinir_pin invalidam sessões antigas
+   Substituído DELETE+INSERT por upsert. Sessões antigas em 'sessoes' são
+   apagadas em ambas operações. Se Admin mudar PIN, o usuário cai no próximo pull.
+
+✅ FIX H — op 'oficial' restrito a Admin/Mestre no backend
+   Antes só o frontend bloqueava. Agora o _push recusa 'oficial' se
+   perfil não for Admin/Mestre (fecha bypass de SB via console).
+
+✅ FIX I — auto-logout no frontend ao receber 401
+   Interceptor global no window.fetch. Se 401 (exceto /login), limpa 
+   localStorage e recarrega. Sessões revogadas/expiradas caem na hora.
+
+✅ FIX J — op 'elenco' restrito a Admin/Mestre (fase 2)
+   Frontend esconde a aba "Militares" para perfis SB. Backend recusa
+   ops 'elenco' se perfil não for Admin/Mestre.
+
+✅ FIX K — op 'mov' restrito e autor forçado (fase 2)
+   Autor do movimento é forçado para u["nome"] (ignora payload).
+   Op restrito a Admin/Mestre (evita spam no log de auditoria).
+
+✅ FIX L — Exibe nome do usuário logado no cabeçalho
+   Span #lblNomeUsuario adicionada ao lado do seletor de perfil.
 
 ✅ _redefinir_pin — VALIDADO empiricamente
    PK de usuarios é 'nome', então merge-duplicates resolve sem on_conflict.
-   Testado: TESTE_PIN com 111111 → redefinir p/ 222222 → login funcionou.
 
 ✅ Endpoints corrigidos (DELETE com params em vez de body):
-   - _logout
-   - _revogar_usuario
-   - _encerrar_sessoes
+   - _logout, _revogar_usuario, _encerrar_sessoes
 
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -107,20 +126,25 @@ Atualizado: 2026-11-15
 
 
 ═══════════════════════════════════════════════════════════════════════════════
-5) BACKLOG — PRÓXIMOS PASSOS (nenhum crítico)
+5) BACKLOG — PRÓXIMOS PASSOS
 ═══════════════════════════════════════════════════════════════════════════════
 
-🟢 COSMÉTICO
-   (nenhum item pendente — o batch de 2026-11-15 resolveu os 2 anteriores;
-   ver FIX D na seção 3)
+🟢 EM ANDAMENTO (Fase Atual)
+   - Implementação do Log de Auditoria de Acesso (Opção 2).
+   - Criar tabela 'logs_acesso' no Supabase.
+   - Adicionar helper registrar_log() e chamadas no _login/_logout.
+   - Criar rota /logs no backend (apenas Admin/Mestre).
+   - Criar interface "Auditoria" no frontend (listar os 200 logs mais recentes).
 
-🟢 EVOLUÇÃO
+🟢 FEATURES FUTURAS
+   - Log de movimentação e afastamento de militar com interface visual.
+   - Relatórios PDF/CSV.
+   - Notificações / PWA (instalável e offline).
+
+🟢 EVOLUÇÃO TÉCNICA
    - Controle de concorrência otimista no _push (versao_esperada / merge
      por ts). Hoje dois devices editando a MESMA marca no mesmo segundo:
      last-write-wins. Aceitável, mas pode evoluir.
-   - Auditoria de segurança (pode_gravar, rate limit login, expiração sessão).
-   - Documentação do usuário (manual rápido).
-   - Novas features: relatórios PDF/CSV, notificações, audit log, PWA, etc.
 
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -145,6 +169,9 @@ JSON.parse(localStorage.getItem('escala7gb-fila') || '[]')         // fila pende
 7) LIÇÕES APRENDIDAS
 ═══════════════════════════════════════════════════════════════════════════════
 
+- NUNCA confiar no frontend para validar regras de negócio (ex: permissões de 
+  perfil). O usuário pode injetar payloads via console. O backend deve sempre
+  validar (Cenário A: op elenco e mov restritos a Admin/Mestre).
 - Não confiar em "deve ser cache" — investigar sempre.
 - Múltiplos projetos Supabase = confusão. Confirmar current_database() antes.
 - PostgREST trunca em 1000 sem aviso. Paginação obrigatória.
