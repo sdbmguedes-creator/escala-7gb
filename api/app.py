@@ -364,20 +364,33 @@ class Handler(BaseHTTPRequestHandler):
         if not u or u["perfil"] != "Admin":
             json_response(self, {"ok": False, "erro": "não autorizado (apenas Admin)"}, 403)
             return
-
         usuarios = sb_select("usuarios") or []
+        sessoes_ativas = sb_select("sessoes", {"ativo": "true"}) or []
+        
+        # Busca os últimos logins para preencher a coluna "Último acesso"
+        logs_login = sb_select("logs_acesso", {"acao": "login"}, order="ts.desc", limit=500) or []
+        
+        sessoes_map = {}
+        for s in sessoes_ativas:
+            sessoes_map[s["nome"]] = sessoes_map.get(s["nome"], 0) + 1
+            
+        ultimo_map = {}
+        for l in logs_login:
+            if l["nome"] not in ultimo_map:
+                ultimo_map[l["nome"]] = l["ts"]
+                
         out = []
         for x in usuarios:
+            nome = x.get("nome")
             out.append({
-                "nome": x.get("nome"),
+                "nome": nome,
                 "perfil": x.get("perfil"),
                 "ativo": bool(x.get("ativo")),
                 "temPin": bool(x.get("pin_hash")),
-                "sessoes": 0,
-                "ultimo": "",
+                "sessoes": sessoes_map.get(nome, 0),
+                "ultimo": ultimo_map.get(nome, ""),
             })
-
-        json_response(self, {"ok": True, "usuarios": out, "totalSessoes": 0})
+        json_response(self, {"ok": True, "usuarios": out, "totalSessoes": len(sessoes_ativas)})
 
     def _revogar_usuario(self):
         corpo = read_body(self)

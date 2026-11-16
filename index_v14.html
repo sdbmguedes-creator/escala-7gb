@@ -5418,10 +5418,16 @@ async function atualizarDoServidor(ym){
   // mesmo quando servidor e cliente estão ambos em versao 0.
   if (_ultimaRemota > 0 && r.versao === versaoAntes) return;
 
-  aplicarRemoto(estadoDoServidor(r), ym);
+    aplicarRemoto(estadoDoServidor(r), ym);
   Sync.versao = r.versao;
   _ultimaRemota = Date.now();
-  desenhar();
+  
+  // Se o usuário estiver vendo a Auditoria, NÃO redesenha a escala por baixo
+  var btnAud = document.getElementById('btnAuditoria');
+  if (!btnAud || !btnAud.classList.contains('active')) {
+    desenhar();
+  }
+  
   try{ status("atualizado — outro usuário gravou"); }catch(e){}
   console.log("[sync] atualizado por outro usuário · versao", r.versao);
 }
