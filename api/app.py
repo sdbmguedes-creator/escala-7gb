@@ -349,9 +349,10 @@ class Handler(BaseHTTPRequestHandler):
             "bloqueado_ate": None,
         }, extra_headers={"Prefer": "resolution=merge-duplicates"})
 
-        # Invalida sessões antigas (perfil pode ter mudado; demotion efetiva)
+   # Invalida sessões antigas (perfil pode ter mudado; demotion efetiva)
         try:
             sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
+            registrar_log(u["nome"], u["perfil"], "revogado", f"Edição/Criação de usuário - Alvo: {nome}")
         except Exception:
             pass
 
@@ -907,11 +908,14 @@ class Handler(BaseHTTPRequestHandler):
             extra_headers={"Prefer": "resolution=merge-duplicates"},
         )
 
-         # Invalida sessões antigas (o PIN mudou; quem estava logado com o antigo cai)
+        # Invalida sessões antigas (o PIN mudou; quem estava logado com o antigo cai)
         try:
             sb_request("DELETE", "sessoes", params={"nome": f"eq.{nome}"})
+            registrar_log(u["nome"], u["perfil"], "revogado", f"Redefinição de PIN - Alvo: {nome}")
         except Exception:
             pass
+
+        json_response(self, {"ok": True})
 
         
         json_response(self, {"ok": True})
