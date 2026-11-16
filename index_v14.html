@@ -5597,25 +5597,6 @@ function iniciarApp(){
     atualizarBotaoSair();
     var lblNome = document.getElementById("lblNomeUsuario");
     if (lblNome && Sessao.nome) lblNome.textContent = Sessao.nome;
-    if (Sessao.perfil && Sessao.perfil !== "Admin" && Sessao.perfil !== "Mestre") {
-      setTimeout(() => {
-        document.querySelectorAll('nav button').forEach(btn => {
-          if (btn.textContent.trim().toLowerCase() === "militares" || btn.textContent.trim().toLowerCase() === "auditoria") {
-            btn.style.display = "none";
-          }
-        });
-      }, 100);
-    } else {
-      // Adiciona o botão de Auditoria dinamicamente para Admin/Mestre
-      const nav = document.getElementById('nav');
-      if (nav && !document.getElementById('btnAuditoria')) {
-        const btn = document.createElement('button');
-        btn.id = 'btnAuditoria';
-        btn.textContent = 'Auditoria';
-        btn.onclick = abrirAuditoria;
-        nav.appendChild(btn);
-      }
-    }
     if (location.search.indexOf("testes=1") >= 0) setTimeout(rodarTestesCliente, 400);
   }
 
@@ -5646,9 +5627,9 @@ function iniciarApp(){
 
 async function abrirAuditoria() {
   const main = document.getElementById('main');
-  main.innerHTML = '<div style="padding:20px;text-align:center;">Carregando auditoria...</div>';
+  main.innerHTML = '<div style="padding:20px;text-align:center;font-weight:600;color:#1f3b5c;">Carregando auditoria...</div>';
   
-  // Remove active de todos os botões do nav e marca o Auditoria
+  // Marca o botão como ativo
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   const btnA = document.getElementById('btnAuditoria');
   if (btnA) btnA.classList.add('active');
@@ -5663,17 +5644,15 @@ async function abrirAuditoria() {
     const data = await res.json();
     if (!data.ok) throw new Error(data.erro || "Erro ao carregar");
 
-    let html = '<div style="padding:16px; max-width:1000px; margin:0 auto;">';
+    let html = '<div style="padding:16px; max-width:1100px; margin:0 auto;">';
     html += '<h2 style="color:#1f3b5c;margin-bottom:16px;">Logs de Acesso (Últimos 200)</h2>';
-    html += '<table class="milTable" style="width:100%; border-collapse:collapse;">';
+    html += '<table class="milTable" style="width:100%; border-collapse:collapse; background:#fff;">';
     html += '<thead><tr><th>Data/Hora</th><th>Usuário</th><th>Perfil</th><th>Ação</th><th>Detalhes</th></tr></thead><tbody>';
 
     (data.logs || []).forEach(log => {
-      // Formata a data ISO (ts) para o padrão brasileiro
       const dt = new Date(log.ts);
       const dataFmt = dt.toLocaleString('pt-BR');
       
-      // Cor da ação
       let corAcao = '#212529';
       if (log.acao === 'login') corAcao = '#198754';
       if (log.acao === 'logout') corAcao = '#6c757d';
@@ -5692,9 +5671,48 @@ async function abrirAuditoria() {
     main.innerHTML = html;
 
   } catch (e) {
-    main.innerHTML = `<div style="padding:20px;color:#dc3545;">Erro ao carregar logs: ${e.message}</div>`;
+    main.innerHTML = `<div style="padding:20px;color:#dc3545;font-weight:bold;">Erro ao carregar logs: ${e.message}</div>`;
   }
 }
+
+// 2. O "Vigia": injeta o botão e esconde abas restritas independente de como o app carrega
+let _ultimoPerfilAud = null;
+setInterval(() => {
+  const selectPerfil = document.getElementById('perfilGlobal');
+  const nav = document.getElementById('nav');
+  if (!selectPerfil || !nav) return;
+  
+  const perfilAtual = selectPerfil.value;
+  
+  // Se mudou o perfil ou se o botão foi apagado pelo app
+  if (perfilAtual !== _ultimoPerfilAud || ((perfilAtual === "Admin" || perfilAtual === "Mestre") && !document.getElementById('btnAuditoria'))) {
+    _ultimoPerfilAud = perfilAtual;
+    const isAdmMestre = (perfilAtual === "Admin" || perfilAtual === "Mestre");
+
+    // Controla a aba "Militares"
+    document.querySelectorAll('nav button').forEach(btn => {
+      if (btn.textContent.trim().toLowerCase() === "militares") {
+        btn.style.display = isAdmMestre ? "" : "none";
+      }
+    });
+
+    // Controla a aba "Auditoria"
+    const btnAud = document.getElementById('btnAuditoria');
+    if (isAdmMestre) {
+      if (!btnAud) {
+        const btn = document.createElement('button');
+        btn.id = 'btnAuditoria';
+        btn.textContent = 'Auditoria';
+        btn.onclick = abrirAuditoria;
+        nav.appendChild(btn);
+      } else {
+        btnAud.style.display = "";
+      }
+    } else {
+      if (btnAud) btnAud.style.display = "none";
+    }
+  }
+}, 1000); // Verifica a cada 1 segundo
 
 </script>
 
