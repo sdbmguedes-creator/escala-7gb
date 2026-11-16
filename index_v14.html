@@ -5645,7 +5645,7 @@ async function abrirAuditoria() {
     if (!data.ok) throw new Error(data.erro || "Erro ao carregar");
 
     let html = '<div style="padding:16px; max-width:1100px; margin:0 auto;">';
-    html += '<h2 style="color:#1f3b5c;margin-bottom:16px;">Logs de Acesso (Últimos 200)</h2>';
+    html += '<h2 style="color:#1f3b5c;margin-bottom:16px;">AUDITORIA — LOGS DE ACESSO (Últimos 200)</h2>';
     html += '<table class="milTable" style="width:100%; border-collapse:collapse; background:#fff;">';
     html += '<thead><tr><th>Data/Hora</th><th>Usuário</th><th>Perfil</th><th>Ação</th><th>Detalhes</th></tr></thead><tbody>';
 
@@ -5702,7 +5702,7 @@ setInterval(() => {
       if (!btnAud) {
         const btn = document.createElement('button');
         btn.id = 'btnAuditoria';
-        btn.textContent = 'Auditoria';
+        btn.textContent = 'AUDITORIA';
         btn.onclick = abrirAuditoria;
         nav.appendChild(btn);
       } else {
