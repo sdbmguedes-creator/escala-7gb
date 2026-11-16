@@ -272,6 +272,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+         # LIMITE DE 1 SESSÃO POR USUÁRIO: apaga sessões antigas antes de criar a nova
+        try:
+            sb_request("DELETE", "sessoes", params={"nome": f"eq.{alvo['nome']}"})
+        except Exception:
+            pass
+
         token = uuid.uuid4().hex + uuid.uuid4().hex
         expira = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)).isoformat()
         sb_request("POST", "sessoes", body={
