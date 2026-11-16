@@ -106,6 +106,29 @@ Atualizado: 2026-11-15
 ✅ FIX L — Exibe nome do usuário logado no cabeçalho
    Span #lblNomeUsuario adicionada ao lado do seletor de perfil.
 
+✅ FIX M — Limite de 1 sessão por usuário
+   No _login, antes de gerar o token novo, as sessões antigas daquele
+   usuário são apagadas (sb_delete). Se logar no PC e depois no celular,
+   o PC cai no próximo pull (401).
+
+✅ FIX N — Correção da aba "Acessos" (Sessões e Último Acesso)
+   _listar_usuarios agora busca as sessões ativas reais e faz um parse 
+   do 'logs_acesso' (limit=500) para exibir o último login. Não é mais
+   chumbado em 0.
+
+✅ FIX O — Evita tela piscando na Auditoria
+   atualizarDoServidor verifica se o botão 'AUDITORIA' está ativo. Se 
+   estiver, não chama desenhar() para não expulsar o usuário da tela.
+
+✅ FEATURE — Tela de Auditoria (Logs de Acesso)
+   - Tabela 'logs_acesso' criada no Supabase (id, nome, perfil, acao, ts, detalhes).
+   - Helper registrar_log() silencioso no backend.
+   - Endpoint /logs (restrito a Admin/Mestre).
+   - Triggers de gravação: _login, _logout, _redefinir_pin, _criar_usuario,
+     _revogar_usuario e _encerrar_sessoes.
+   - Interface no frontend (botão "AUDITORIA" via setInterval injetado,
+     exibindo tabela com cores por tipo de ação: Login=verde, Revogado=vermelho).
+
 ✅ _redefinir_pin — VALIDADO empiricamente
    PK de usuarios é 'nome', então merge-duplicates resolve sem on_conflict.
 
