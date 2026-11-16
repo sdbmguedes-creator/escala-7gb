@@ -192,6 +192,7 @@ class Handler(BaseHTTPRequestHandler):
     def _login(self):
         corpo = read_body(self)
         pin = corpo.get("pin", "")
+        JANELA_MIN = 15  # <--- ADICIONE ESTA LINHA AQUI
 
         try:
             tent_rows = sb_select("propriedades", {"chave": "LOGIN_TENTATIVAS"})
