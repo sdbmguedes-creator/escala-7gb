@@ -200,17 +200,25 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
 @media print {
   @page { size: landscape; margin: 5mm; }
   
-  /* O SEGREDO: Reduz a tela em 35% para caber todos os dias e a coluna PIES na folha A4 */
+  /* 1. Reduz a escala geral para 60% para caber os 30 dias + PIES na folha A4 */
   body { 
-    zoom: 0.65 !important; 
+    zoom: 0.60 !important; 
+    margin: 0 !important; 
+    padding: 0 !important; 
+    background: #fff !important;
     -webkit-print-color-adjust: exact !important; 
     print-color-adjust: exact !important; 
   }
-  
+
+  /* 2. Esmaga e esconde o menu inferior e o topo para não vazarem no papel */
   header, nav, .acoes, #toast, #menu, .confBar, .opControlBar, .confFilterBar { 
     display: none !important; 
+    position: static !important; 
+    visibility: hidden !important;
+    height: 0 !important;
   }
   
+  /* 3. Remove o espaçamento gigante de 250px que existe para o menu na tela */
   main { 
     padding: 0 !important; 
     margin: 0 !important; 
@@ -218,16 +226,16 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
     overflow: visible !important; 
   }
   
-  /* Desativa o max-content que estava forçando a tabela a vazar da folha */
-  main > table, table.gradeSb, table.aco, table.diario { 
-    width: 100% !important; 
-    max-width: 100% !important; 
-    table-layout: auto !important; 
+  /* 4. Força a tabela a se ajustar à página */
+  table { 
     page-break-inside: auto; 
+    width: 100% !important; 
+    max-width: 100% !important;
+    table-layout: auto !important; 
   }
   
   tr { page-break-inside: avoid; page-break-after: auto; }
-  th, td { font-size: 11px !important; padding: 1px 2px !important; border: 1px solid #ccc !important; }
+  th, td { font-size: 10px !important; padding: 1px 2px !important; border: 1px solid #ccc !important; }
 }
 
 </style></head><body>
