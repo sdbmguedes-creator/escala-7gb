@@ -172,6 +172,18 @@ Atualizado: 2026-11-15
    - Eliminado o setInterval de controle de menus. O desenhar() agora é a
      única autoridade sobre a barra de navegação.
 
+✅ FASE 4 — Otimização de Performance e Resiliência Offline
+   - Polling ativo reduzido de 5s para 2s (PULL_ATIVO_MS = 2000).
+   - Polling ocioso reduzido para 30s (PULL_OCIOSO_TICKS = 15).
+   - Novo Event Listener 'visibilitychange' no frontend: quando o usuário 
+     volta para a aba do navegador, o sistema puxa os dados na hora, sem 
+     precisar de F5.
+   - Monitor de conexão (navigator.onLine): exibe aviso amarelo 
+     "⚠️ OFFLINE (Salvando local)" no topo e verde "Sincronizando..." quando 
+     a internet volta. A fila de operações pendentes é enviada automaticamente.
+   - O tempo de bloqueio de interação caiu de 3s para 1s.
+
+
 ═══════════════════════════════════════════════════════════════════════════════
 4) ESTRUTURA DE ARQUIVOS
 ═══════════════════════════════════════════════════════════════════════════════
