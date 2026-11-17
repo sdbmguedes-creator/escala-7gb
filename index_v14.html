@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="pt-BR"><head><!-- ESCALA-7GB build 2026-11-11 v14 | elenco+ACO por SB | vis/visLinhas/aco fora de meta | ver BUILD_APP no JS --><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1f3b5c">
+<link rel="manifest" href="/manifest.json">
 <title>Escala 7º GB</title>
 <style>
 :root{--alfa:#c6e0b4;--bravo:#ffe699;--charlie:#9fc5e8;--delta:#d9d9d9;
@@ -6290,6 +6292,18 @@ setInterval(() => {
   window.testes = { rodar, resultados };
   console.log("[testes] harness instalado. Rode: window.testes.rodar()");
 })();
+
+// =========================================================
+// REGISTRO DO PWA (SERVICE WORKER)
+// =========================================================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('[PWA] Service Worker registrado com sucesso.', reg.scope))
+      .catch(err => console.error('[PWA] Falha ao registrar Service Worker:', err));
+  });
+}
+
 </script>
 
 
