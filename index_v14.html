@@ -5642,17 +5642,25 @@ function aplicarRemoto(remoto, ym){
    5 s com atividade recente · 30 s ocioso · nada com a aba oculta.
    Cada consulta é uma execução no Apps Script: 5 s fixo estouraria a cota. */
 var _ultimaInteracao = 0, _ultimaRemota = 0, _pollTimer = null, _pollTick = 0;
-var PULL_ATIVO_MS = 5000, PULL_OCIOSO_TICKS = 6, JANELA_ATIVO_MS = 120000;
-
+// Otimização Fase 4: Polling a cada 2s (ativo). Ocioso a cada 30s. Janela de 5 min.
+var PULL_ATIVO_MS = 2000, PULL_OCIOSO_TICKS = 15, JANELA_ATIVO_MS = 300000;
 function _marcarInteracao(){ _ultimaInteracao = Date.now(); }
 document.addEventListener("pointerdown", _marcarInteracao, true);
 document.addEventListener("keydown", _marcarInteracao, true);
+// FASE 4: Atualização instantânea ao desminimizar ou trocar de aba
+document.addEventListener("visibilitychange", function() {
+  if (!document.hidden && typeof Sync !== 'undefined' && Sync.ligado) {
+    var ym = String(D.competencia).slice(0, 7);
+    atualizarDoServidor(ym).catch(function(){});
+  }
+});
+
 
 async function atualizarDoServidor(ym){
   if (!Sync.ligado || document.hidden) return;
   if (Sync.estado === "enviando") return;
   if (Sync.fila.length) return;
-  if (Date.now() - _ultimaInteracao < 3000) return;
+  if (Date.now() - _ultimaInteracao < 1000) return; // Reduzido de 3s para 1s
 
   var versaoAntes = Sync.versao;
   var r = await Transport.call("apiPull", [ym, Sessao.token, Sync.versao]).catch(function(){ return null; });
@@ -6345,6 +6353,34 @@ async function abrirAuditoria() {
   window.testes = { rodar, resultados };
   console.log("[testes] harness instalado. Rode: window.testes.rodar()");
 })();
+
+// =========================================================
+// MONITOR DE CONEXÃO (OFFLINE / ONLINE)
+// =========================================================
+function atualizarStatusConexao() {
+  var el = document.getElementById("syncStatus");
+  if (!el) return;
+  
+  if (navigator.onLine) {
+    if (!el.textContent || el.textContent.includes("OFFLINE")) {
+       el.textContent = "Sincronizando...";
+       el.style.color = "#4ade80"; // Verde claro
+       // Força uma sincronização imediata da fila
+       if (typeof Sync !== 'undefined' && Sync.ligado) {
+         var ym = String(D.competencia).slice(0, 7);
+         atualizarDoServidor(ym).catch(function(){});
+         // Se houver uma função flush da fila, chame aqui (ex: Sync.flush())
+       }
+    }
+  } else {
+    el.textContent = "⚠️ OFFLINE (Salvando local)";
+    el.style.color = "#ffc107"; // Amarelo
+  }
+}
+
+window.addEventListener("online", atualizarStatusConexao);
+window.addEventListener("offline", atualizarStatusConexao);
+setTimeout(atualizarStatusConexao, 1000); // Verifica ao carregar a página
 
 // =========================================================
 // REGISTRO DO PWA (SERVICE WORKER)
