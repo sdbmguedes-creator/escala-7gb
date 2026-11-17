@@ -5584,7 +5584,9 @@ function estadoDoServidor(p){
     comments: cm,
     acoOficiais: p.acoOficiais || {},
     movimentos: p.movimentos || [],
+    elenco: p.elenco || [], // <--- ADICIONE ESTA LINHA
     statusMes: (p.meta && p.meta.status) || "ativa",
+    // ...
     vis: (p.meta && p.meta.vis) || {},
     visLinhas: (p.meta && p.meta.visLinhas) || {},
     aco: (p.meta && p.meta.aco) || []
@@ -5605,7 +5607,29 @@ function aplicarRemoto(remoto, ym){
   if (remoto.visLinhas && Object.keys(remoto.visLinhas).length) D.visLinhas = remoto.visLinhas;
   if (remoto.aco && remoto.aco.length) aco = remoto.aco;
   if (remoto.statusMes) statusMes = remoto.statusMes;
-  if (local && local.mes) D.mes = local.mes;
+  
+  // NOVO: Sincroniza o cadastro (D.mes) com os dados do servidor
+  if (remoto.elenco && remoto.elenco.length) {
+    if (!D.mes) D.mes = [];
+    remoto.elenco.forEach(function(rem) {
+      var loc = D.mes.find(function(x) { return x.id === rem.id; });
+      if (loc) {
+        loc.secao = rem.secao;
+        loc.escala = rem.escala;
+        loc.motorista = rem.motorista;
+        loc.adm = rem.adm;
+        loc.restricao = rem.restricao;
+        loc.cotasAdm = rem.cotasAdm;
+        loc.afast = rem.afast;
+        loc.escalaOrigem = rem.escalaOrigem;
+        loc.escalaOrigemAdm = rem.escalaOrigemAdm;
+      } else {
+        D.mes.push(rem);
+      }
+    });
+  } else {
+    if (local && local.mes) D.mes = local.mes;
+  }
 
   autoX = true;
   reconstruirIndiceMarcas();
