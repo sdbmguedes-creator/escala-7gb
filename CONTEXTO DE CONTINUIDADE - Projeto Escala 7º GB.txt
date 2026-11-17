@@ -153,6 +153,25 @@ Atualizado: 2026-11-15
    - CSS @media print configurado com zoom (0.60) e paisagem (landscape)
      para imprimir a escala inteira no papel sem cortar as colunas.
 
+✅ FEATURE — Histórico de Movimentações
+   - Nova aba "MOVIMENTAÇÕES" (Admin/Mestre) lendo o array D.movimentos.
+   - Mudanças de seção (função trocarSecaoMilitar) agora enfileiram duas ops:
+     op 'elenco' (para mudar no banco) e op 'mov' (para registrar no histórico).
+   - Adicionada a coluna "Autor" no histórico para auditoria.
+
+✅ FIX Q — Sincronização de Elenco (D.mes) no Frontend
+   - O _pull agora envia o elenco. A função estadoDoServidor repassa e o
+     aplicarRemoto atualiza o D.mes (seção, escala, afastamentos, etc).
+   - Antes, o frontend só usava o localStorage para o elenco, o que fazia
+     com que mudanças de seção feitas por um Mestre não aparecessem para os
+     outros perfis (Admin/SB).
+
+✅ FIX R — Controle nativo de abas por perfil (Menu UI)
+   - Abas DIARIO, OPERACIONAL, MILITARES, AFASTAMENTOS, MOVIMENTAÇÕES e 
+     AUDITORIA só são construídas no menu se o perfil for Admin ou Mestre.
+   - Eliminado o setInterval de controle de menus. O desenhar() agora é a
+     única autoridade sobre a barra de navegação.
+
 ═══════════════════════════════════════════════════════════════════════════════
 4) ESTRUTURA DE ARQUIVOS
 ═══════════════════════════════════════════════════════════════════════════════
@@ -177,10 +196,10 @@ Atualizado: 2026-11-15
    - Criar interface "Auditoria" no frontend (listar os 200 logs mais recentes).
 
 🟢 FEATURES FUTURAS
-   - Auditoria de Dados: Log de movimentação e afastamento de militar (tela).
    - Notificações Push (ex: avisar o militar no celular quando a escala mudar).
-   - Novas telas e fluxos de escala.
-   
+   - Relatórios PDF/CSV mais avançados (dashboards de estatísticas).
+   - Log de alterações e afastamentos (evoluir a tela de auditoria).
+
 🟢 EVOLUÇÃO TÉCNICA
    - Controle de concorrência otimista no _push (versao_esperada / merge
      por ts).
