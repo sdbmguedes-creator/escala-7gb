@@ -2085,11 +2085,13 @@ function desenhar(){
   const nav = document.getElementById("nav");
   const _navScroll = nav.scrollLeft;
   nav.innerHTML = "";
-    const abasNav = [...SBS,"ACO","CONF. INDIV.","CONFERÊNCIA","DIARIO","OPERACIONAL","MILITARES","AFASTAMENTOS"];
-  if (perfilAtual === "Admin" && Transport.disponivel()) abasNav.push("ACESSOS");
-  if (perfilAtual === "Admin" || ehMestre()) {
-    abasNav.push("MOVIMENTAÇÕES");
-    abasNav.push("AUDITORIA");
+      let abasNav = [...SBS,"ACO","CONF. INDIV.","CONFERÊNCIA"];
+  const isAdmMestre = (perfilAtual === "Admin" || perfilAtual === "Mestre");
+  
+  if (isAdmMestre) {
+    abasNav.push("DIARIO", "OPERACIONAL", "MILITARES", "AFASTAMENTOS");
+    if (Transport.disponivel()) abasNav.push("ACESSOS");
+    abasNav.push("MOVIMENTAÇÕES", "AUDITORIA");
   }
   abasNav.forEach(t=>{
     const b = document.createElement("button");
@@ -5055,7 +5057,7 @@ function desenharMovimentacoes(main){
 
   const t = document.createElement("table");
   t.className = "milTable";
-  t.innerHTML = "<thead><tr><th>Data/Hora</th><th>Tipo</th><th>Origem</th><th>Destino</th><th>Qtd</th><th>Detalhes/Motivo</th></tr></thead><tbody></tbody>";
+  t.innerHTML = "<thead><tr><th>Data/Hora</th><th>Autor</th><th>Tipo</th><th>Origem</th><th>Destino</th><th>Qtd</th><th>Detalhes/Motivo</th></tr></thead><tbody></tbody>";
   
   const tb = t.querySelector("tbody");
   const movs = (D.movimentos || []).slice().reverse(); // Mostra os mais recentes primeiro
@@ -5069,6 +5071,7 @@ function desenharMovimentacoes(main){
       try { dt = new Date(m.quando).toLocaleString('pt-BR'); } catch(e) { dt = m.quando || ""; }
       
       tr.innerHTML = `<td style="white-space:nowrap">${dt}</td>
+        <td>${m.autor || "Desconhecido"}</td>
         <td><strong>${m.tipo || ""}</strong></td>
         <td>${m.origem || "-"}</td>
         <td>${m.destino || "-"}</td>
@@ -5299,9 +5302,10 @@ function trocarSecaoMilitar(reg, novaSecao, el){
   });
   reg.secao = novaSecao;
   reconstruirIndiceMarcas();
-   D.movimentos = D.movimentos || [];
+  D.movimentos = D.movimentos || [];
   const novaMov = {
     quando: new Date().toISOString(), 
+    autor: (typeof Sessao !== 'undefined' && Sessao.nome) ? Sessao.nome : "Sistema",
     tipo: "mudanca_sb",
     origem: antiga, 
     destino: novaSecao, 
@@ -5312,6 +5316,10 @@ function trocarSecaoMilitar(reg, novaSecao, el){
   
   // Envia para o servidor (Backend)
   if (typeof enfileirar === 'function') {
+    // 1. Avisa o servidor para mudar a seção do militar no banco (AQUI ESTÁ A SOLUÇÃO DO BUG)
+    enfileirar({ t: "elenco", id: reg.id, campos: { secao: novaSecao } });
+    
+    // 2. Salva o histórico da movimentação
     enfileirar({ t: "mov", dados: novaMov });
   }
   
