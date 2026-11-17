@@ -2085,8 +2085,9 @@ function desenhar(){
   const nav = document.getElementById("nav");
   const _navScroll = nav.scrollLeft;
   nav.innerHTML = "";
-  const abasNav = [...SBS,"ACO","CONF. INDIV.","CONFERÊNCIA","DIARIO","OPERACIONAL","MILITARES","AFASTAMENTOS"];
+    const abasNav = [...SBS,"ACO","CONF. INDIV.","CONFERÊNCIA","DIARIO","OPERACIONAL","MILITARES","AFASTAMENTOS"];
   if (perfilAtual === "Admin" && Transport.disponivel()) abasNav.push("ACESSOS");
+  if (perfilAtual === "Admin" || ehMestre()) abasNav.push("MOVIMENTAÇÕES");
   abasNav.forEach(t=>{
     const b = document.createElement("button");
     b.textContent = t; b.className = (t===abaAtual?"active":"");
@@ -2157,7 +2158,7 @@ function desenhar(){
     }).join("");
     main.appendChild(lg);
   }
-  if (SBS.includes(abaAtual)) desenharGrade2(main, abaAtual);
+    if (SBS.includes(abaAtual)) desenharGrade2(main, abaAtual);
   else if (abaAtual==="ACO") desenharAco(main);
   else if (abaAtual==="CONF. INDIV.") desenharConfIndiv(main);
   else if (abaAtual==="CONFERÊNCIA") desenharConferencia(main);
@@ -2165,6 +2166,7 @@ function desenhar(){
   else if (abaAtual==="MILITARES") desenharMilitares(main);
   else if (abaAtual==="AFASTAMENTOS") desenharAfastamentos(main);
   else if (abaAtual==="ACESSOS") desenharAcessos(main);
+  else if (abaAtual==="MOVIMENTAÇÕES") desenharMovimentacoes(main);
   else desenharOperacional2(main);
   document.querySelectorAll("td.celulaForaOrigem").forEach(function(td){
     const txt = String(td.textContent||"").trim();
@@ -5034,6 +5036,48 @@ function desenharAfastamentos(main){
   res.appendChild(t2);
 }
 
+// ===== 9.9 MOVIMENTAÇÕES =====
+function desenharMovimentacoes(main){
+  const h = document.createElement("p"); h.className="setor";
+  h.textContent = "HISTÓRICO DE MOVIMENTAÇÕES E ALTERAÇÕES";
+  main.appendChild(h);
+  
+  if (typeof ehMestre === 'function' && !ehMestre() && perfilAtual !== "Admin") {
+    const av = document.createElement("p");
+    av.style.cssText="color:#8a6d3b;font-size:12.5px";
+    av.textContent = "Esta aba é exclusiva para Admin e Mestre.";
+    main.appendChild(av); return;
+  }
+
+  const t = document.createElement("table");
+  t.className = "milTable";
+  t.innerHTML = "<thead><tr><th>Data/Hora</th><th>Tipo</th><th>Origem</th><th>Destino</th><th>Qtd</th><th>Detalhes/Motivo</th></tr></thead><tbody></tbody>";
+  
+  const tb = t.querySelector("tbody");
+  const movs = (D.movimentos || []).slice().reverse(); // Mostra os mais recentes primeiro
+  
+  if (!movs.length) {
+    tb.innerHTML = "<tr><td colspan='6' style='text-align:center;color:#6c757d'>Nenhuma movimentação registrada.</td></tr>";
+  } else {
+    movs.forEach(m => {
+      const tr = document.createElement("tr");
+      let dt = "";
+      try { dt = new Date(m.quando).toLocaleString('pt-BR'); } catch(e) { dt = m.quando || ""; }
+      
+      tr.innerHTML = `<td style="white-space:nowrap">${dt}</td>
+        <td><strong>${m.tipo || ""}</strong></td>
+        <td>${m.origem || "-"}</td>
+        <td>${m.destino || "-"}</td>
+        <td>${m.qtd || 0}</td>
+        <td style="font-size:11px">${m.motivo || ""}</td>`;
+      tb.appendChild(tr);
+    });
+  }
+  
+  main.appendChild(t);
+}
+
+
 // ===== 10. AÇÕES (marcar, trocarMilitar, ajustarEscala, ...) =====
 function marcar(grupo,id,dia,cod){
   if (ehPreparacao() && !abaLiberada(String(grupo).replace(/^host:/,""))){
@@ -5251,10 +5295,22 @@ function trocarSecaoMilitar(reg, novaSecao, el){
   });
   reg.secao = novaSecao;
   reconstruirIndiceMarcas();
-  D.movimentos = D.movimentos || [];
-  D.movimentos.push({quando:new Date().toISOString(), tipo:"mudanca_sb",
-    origem:antiga, destino:novaSecao, qtd:qtd,
-    motivo:reg.id+" "+nome+" (host expurgadas: "+hostChaves.length+")"});
+   D.movimentos = D.movimentos || [];
+  const novaMov = {
+    quando: new Date().toISOString(), 
+    tipo: "mudanca_sb",
+    origem: antiga, 
+    destino: novaSecao, 
+    qtd: qtd,
+    motivo: reg.id + " " + nome + " (host expurgadas: " + hostChaves.length + ")"
+  };
+  D.movimentos.push(novaMov);
+  
+  // Envia para o servidor (Backend)
+  if (typeof enfileirar === 'function') {
+    enfileirar({ t: "mov", dados: novaMov });
+  }
+  
   salvarLocal(); desenhar();
   status("militar movido de "+antiga+" para "+novaSecao+" ("+qtd+" marca(s), "+hostChaves.length+" host expurgada(s))");
 }
@@ -5839,7 +5895,51 @@ let _ultimoPerfilAud = null;
 setInterval(() => {
   const selectPerfil = document.getElementById('perfilGlobal');
   const nav = document.getElementById('nav');
-  if (!selectPerfil || !nav) return;
+    if (perfilAtual !== _ultimoPerfilAud || ((perfilAtual === "Admin" || perfilAtual === "Mestre") && !document.getElementById('btnAuditoria'))) {
+    _ultimoPerfilAud = perfilAtual;
+    const isAdmMestre = (perfilAtual === "Admin" || perfilAtual === "Mestre");
+
+    // Esconde/Controla aba Militares
+    document.querySelectorAll('nav button').forEach(btn => {
+      if (btn.textContent.trim().toLowerCase() === "militares") {
+        btn.style.display = isAdmMestre ? "" : "none";
+      }
+    });
+
+    // 1. Botão AUDITORIA
+    let btnAud = document.getElementById('btnAuditoria');
+    if (isAdmMestre) {
+      if (!btnAud) {
+        btnAud = document.createElement('button');
+        btnAud.id = 'btnAuditoria';
+        btnAud.textContent = 'AUDITORIA';
+        btnAud.onclick = abrirAuditoria;
+        nav.appendChild(btnAud);
+      } else btnAud.style.display = "";
+    } else {
+      if (btnAud) btnAud.style.display = "none";
+    }
+
+    // 2. Botão MOVIMENTAÇÕES
+    let btnMov = document.getElementById('btnMovimentacoes');
+    if (isAdmMestre) {
+      if (!btnMov) {
+        btnMov = document.createElement('button');
+        btnMov.id = 'btnMovimentacoes';
+        btnMov.textContent = 'MOVIMENTAÇÕES';
+        btnMov.onclick = function() {
+          document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+          btnMov.classList.add('active');
+          const main = document.getElementById('main');
+          main.innerHTML = "";
+          desenharMovimentacoes(main);
+        };
+        nav.appendChild(btnMov);
+      } else btnMov.style.display = "";
+    } else {
+      if (btnMov) btnMov.style.display = "none";
+    }
+  }
   
   const perfilAtual = selectPerfil.value;
   
