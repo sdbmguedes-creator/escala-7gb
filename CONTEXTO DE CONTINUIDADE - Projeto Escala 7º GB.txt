@@ -129,6 +129,18 @@ Atualizado: 2026-11-15
    - Interface no frontend (botão "AUDITORIA" via setInterval injetado,
      exibindo tabela com cores por tipo de ação: Login=verde, Revogado=vermelho).
 
+✅ FEATURE — PWA (Aplicativo Instalável)
+   - Criados 'manifest.json', 'sw.js' e ícones (192x192 e 512x512).
+   - Registro do Service Worker no index_v14.html.
+   - O app funciona em modo 'standalone' (tela cheia) e tem cache offline 
+     do esqueleto da página.
+
+✅ FIX P — Backend serve arquivos estáticos para o PWA
+   - O do_GET no app.py intercepta chamadas para .json, .js e .png e 
+     devolve o Content-Type correto, em vez de devolver o index_v14.html.
+   - Sem isso, o Chrome bloqueava a instalação do PWA alegando MIME type 
+     inválido ou erro de sintaxe no manifest.
+
 ✅ _redefinir_pin — VALIDADO empiricamente
    PK de usuarios é 'nome', então merge-duplicates resolve sem on_conflict.
 
@@ -164,11 +176,11 @@ Atualizado: 2026-11-15
    - Criar rota /logs no backend (apenas Admin/Mestre).
    - Criar interface "Auditoria" no frontend (listar os 200 logs mais recentes).
 
-🟢 FEATURES FUTURAS (Ideias levantadas)
+🟢 FEATURES FUTURAS
    - Auditoria de Dados: Log de movimentação e afastamento de militar (tela).
-   - Notificações / PWA (instalável no celular e funcionando offline).
+   - Notificações Push (ex: avisar o militar no celular quando a escala mudar).
    - Novas telas e fluxos de escala.
-
+   
 🟢 EVOLUÇÃO TÉCNICA
    - Controle de concorrência otimista no _push (versao_esperada / merge
      por ts).
