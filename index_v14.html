@@ -197,7 +197,16 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
 #cmtBox .cmtRow button.primary{background:#1f3b5c;color:#fff;border-color:#1f3b5c}
 #cmtBox .cmtRow button.danger{background:#b02a37;color:#fff;border-color:#b02a37}
 #cmtBox .cmtRow button:disabled{opacity:.5;cursor:not-allowed}
-@media print{body{padding-top:0}header,nav{display:none}main{padding:0}}
+@media print {
+  @page { size: landscape; margin: 10mm; }
+  body { padding-top: 0; background: #fff; }
+  header, nav, .acoes, #toast, #menu, .confBar, .opControlBar { display: none !important; }
+  main { padding: 0; width: 100%; overflow: visible; }
+  table { page-break-inside: auto; width: 100% !important; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  th, td { font-size: 10px !important; padding: 2px 4px !important; border: 1px solid #ccc !important; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}
 
 </style></head><body>
 <header>
@@ -214,9 +223,9 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
   </span>
   <span class="acoes">
     <button onclick="salvar()">Salvar</button>
-    <button onclick="exportar()">Exportar</button>
-    <label id="impLabel">Importar<input type="file" id="imp" accept=".json" style="display:none" onchange="importar(this)"></label>
-    <button onclick="window.print()">Imprimir</button>
+    <button onclick="exportarCSV()" title="Baixar planilha do Excel">Exportar CSV</button>
+    <label id="impLabel">Backup JSON<input type="file" id="imp" accept=".json" style="display:none" onchange="importar(this)"></label>
+    <button onclick="window.print()" title="Imprimir ou Salvar como PDF">Imprimir / PDF</button>
     <button id="btnSair" style="display:none" onclick="sair()" title="Encerrar a sessão neste navegador">Sair</button>
   </span>
   <span id="status" style="color:#fff;font-size:12px;opacity:.9;margin-left:10px"></span>
@@ -670,6 +679,55 @@ function exportar(){
   const blob=new Blob([JSON.stringify(dados,null,1)],{type:"application/json"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
   a.download="escala-"+D.competencia.slice(0,7)+".json"; a.click();
+}
+
+function exportarCSV() {
+  try {
+    // Pega a tabela que está visível na tela agora
+    const tabela = document.querySelector("main table");
+    if (!tabela) {
+      alert("Nenhuma tabela encontrada na tela para exportar.");
+      return;
+    }
+
+    let csv = [];
+    const linhas = tabela.querySelectorAll("tr");
+    
+    for (let i = 0; i < linhas.length; i++) {
+      let colunas = linhas[i].querySelectorAll("td, th");
+      // Pula linhas de título que ocupam a tabela inteira (colspan)
+      if (colunas.length <= 1) continue;
+      
+      let linhaDados = [];
+      for (let j = 0; j < colunas.length; j++) {
+        // Pega o texto, limpa quebras de linha e aspas duplas
+        let texto = colunas[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").trim();
+        texto = texto.replace(/"/g, '""');
+        linhaDados.push('"' + texto + '"');
+      }
+      csv.push(linhaDados.join(";"));
+    }
+
+    // \uFEFF é o BOM (Byte Order Mark) que força o Excel a ler os acentos corretamente
+    const blob = new Blob(["\uFEFF" + csv.join("\n")], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    
+    // Nome do arquivo: escala_7gb_2026-11.csv
+    const competencia = D.competencia ? D.competencia.slice(0, 7) : "escala";
+    link.setAttribute("href", url);
+    link.setAttribute("download", `escala_7gb_${competencia}.csv`);
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    try { status("Planilha CSV exportada!"); } catch(e){}
+  } catch (e) {
+    console.error(e);
+    alert("Erro ao gerar CSV: " + e.message);
+  }
 }
 
 // Validação do arquivo a importar: formas esperadas de marks/mes/vis/aco.
