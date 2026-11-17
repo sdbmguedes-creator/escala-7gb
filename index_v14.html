@@ -2087,7 +2087,10 @@ function desenhar(){
   nav.innerHTML = "";
     const abasNav = [...SBS,"ACO","CONF. INDIV.","CONFERÊNCIA","DIARIO","OPERACIONAL","MILITARES","AFASTAMENTOS"];
   if (perfilAtual === "Admin" && Transport.disponivel()) abasNav.push("ACESSOS");
-  if (perfilAtual === "Admin" || ehMestre()) abasNav.push("MOVIMENTAÇÕES");
+  if (perfilAtual === "Admin" || ehMestre()) {
+    abasNav.push("MOVIMENTAÇÕES");
+    abasNav.push("AUDITORIA");
+  }
   abasNav.forEach(t=>{
     const b = document.createElement("button");
     b.textContent = t; b.className = (t===abaAtual?"active":"");
@@ -2167,6 +2170,7 @@ function desenhar(){
   else if (abaAtual==="AFASTAMENTOS") desenharAfastamentos(main);
   else if (abaAtual==="ACESSOS") desenharAcessos(main);
   else if (abaAtual==="MOVIMENTAÇÕES") desenharMovimentacoes(main);
+  else if (abaAtual==="AUDITORIA") abrirAuditoria();
   else desenharOperacional2(main);
   document.querySelectorAll("td.celulaForaOrigem").forEach(function(td){
     const txt = String(td.textContent||"").trim();
@@ -5889,89 +5893,6 @@ async function abrirAuditoria() {
     main.innerHTML = `<div style="padding:20px;color:#dc3545;font-weight:bold;">Erro ao carregar logs: ${e.message}</div>`;
   }
 }
-
-// 2. O "Vigia": injeta o botão e esconde abas restritas independente de como o app carrega
-let _ultimoPerfilAud = null;
-setInterval(() => {
-  const selectPerfil = document.getElementById('perfilGlobal');
-  const nav = document.getElementById('nav');
-    if (perfilAtual !== _ultimoPerfilAud || ((perfilAtual === "Admin" || perfilAtual === "Mestre") && !document.getElementById('btnAuditoria'))) {
-    _ultimoPerfilAud = perfilAtual;
-    const isAdmMestre = (perfilAtual === "Admin" || perfilAtual === "Mestre");
-
-    // Esconde/Controla aba Militares
-    document.querySelectorAll('nav button').forEach(btn => {
-      if (btn.textContent.trim().toLowerCase() === "militares") {
-        btn.style.display = isAdmMestre ? "" : "none";
-      }
-    });
-
-    // 1. Botão AUDITORIA
-    let btnAud = document.getElementById('btnAuditoria');
-    if (isAdmMestre) {
-      if (!btnAud) {
-        btnAud = document.createElement('button');
-        btnAud.id = 'btnAuditoria';
-        btnAud.textContent = 'AUDITORIA';
-        btnAud.onclick = abrirAuditoria;
-        nav.appendChild(btnAud);
-      } else btnAud.style.display = "";
-    } else {
-      if (btnAud) btnAud.style.display = "none";
-    }
-
-    // 2. Botão MOVIMENTAÇÕES
-    let btnMov = document.getElementById('btnMovimentacoes');
-    if (isAdmMestre) {
-      if (!btnMov) {
-        btnMov = document.createElement('button');
-        btnMov.id = 'btnMovimentacoes';
-        btnMov.textContent = 'MOVIMENTAÇÕES';
-        btnMov.onclick = function() {
-          document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-          btnMov.classList.add('active');
-          const main = document.getElementById('main');
-          main.innerHTML = "";
-          desenharMovimentacoes(main);
-        };
-        nav.appendChild(btnMov);
-      } else btnMov.style.display = "";
-    } else {
-      if (btnMov) btnMov.style.display = "none";
-    }
-  }
-  
-  const perfilAtual = selectPerfil.value;
-  
-  // Se mudou o perfil ou se o botão foi apagado pelo app
-  if (perfilAtual !== _ultimoPerfilAud || ((perfilAtual === "Admin" || perfilAtual === "Mestre") && !document.getElementById('btnAuditoria'))) {
-    _ultimoPerfilAud = perfilAtual;
-    const isAdmMestre = (perfilAtual === "Admin" || perfilAtual === "Mestre");
-
-    // Controla a aba "Militares"
-    document.querySelectorAll('nav button').forEach(btn => {
-      if (btn.textContent.trim().toLowerCase() === "militares") {
-        btn.style.display = isAdmMestre ? "" : "none";
-      }
-    });
-
-    // Controla a aba "Auditoria"
-    const btnAud = document.getElementById('btnAuditoria');
-    if (isAdmMestre) {
-      if (!btnAud) {
-        const btn = document.createElement('button');
-        btn.id = 'btnAuditoria';
-        btn.textContent = 'AUDITORIA';
-        btn.onclick = abrirAuditoria;
-        nav.appendChild(btn);
-      } else {
-        btnAud.style.display = "";
-      }
-    } else {
-      if (btnAud) btnAud.style.display = "none";
-    }
-  }
-}, 1000); // Verifica a cada 1 segundo
 
 </script>
 
