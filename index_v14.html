@@ -683,37 +683,48 @@ function exportar(){
 
 function exportarCSV() {
   try {
-    // Pega a tabela que está visível na tela agora
-    const tabela = document.querySelector("main table");
-    if (!tabela) {
+    const main = document.getElementById("main");
+    // Pega TODAS as tabelas que estão na tela (tanto o resumo quanto as escalas)
+    const tabelas = main.querySelectorAll("table");
+    
+    if (!tabelas || tabelas.length === 0) {
       alert("Nenhuma tabela encontrada na tela para exportar.");
       return;
     }
 
-    let csv = [];
-    const linhas = tabela.querySelectorAll("tr");
-    
-    for (let i = 0; i < linhas.length; i++) {
-      let colunas = linhas[i].querySelectorAll("td, th");
-      // Pula linhas de título que ocupam a tabela inteira (colspan)
-      if (colunas.length <= 1) continue;
+    let csvContent = [];
+
+    // Itera sobre cada tabela encontrada
+    for (let t = 0; t < tabelas.length; t++) {
+      const tabela = tabelas[t];
+      const linhas = tabela.querySelectorAll("tr");
       
-      let linhaDados = [];
-      for (let j = 0; j < colunas.length; j++) {
-        // Pega o texto, limpa quebras de linha e aspas duplas
-        let texto = colunas[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").trim();
-        texto = texto.replace(/"/g, '""');
-        linhaDados.push('"' + texto + '"');
+      for (let i = 0; i < linhas.length; i++) {
+        let colunas = linhas[i].querySelectorAll("td, th");
+        
+        // Pula linhas vazias ou de título gigante (colspan)
+        if (colunas.length <= 1) continue;
+        
+        let linhaDados = [];
+        for (let j = 0; j < colunas.length; j++) {
+          let texto = colunas[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").trim();
+          texto = texto.replace(/"/g, '""');
+          linhaDados.push('"' + texto + '"');
+        }
+        csvContent.push(linhaDados.join(";"));
       }
-      csv.push(linhaDados.join(";"));
+      
+      // Adiciona 3 linhas em branco entre uma tabela e outra (para não virar bagunça no Excel)
+      csvContent.push("");
+      csvContent.push("");
+      csvContent.push("");
     }
 
-    // \uFEFF é o BOM (Byte Order Mark) que força o Excel a ler os acentos corretamente
-    const blob = new Blob(["\uFEFF" + csv.join("\n")], { type: 'text/csv;charset=utf-8;' });
+    // \uFEFF é o BOM que força o Excel a ler os acentos corretamente
+    const blob = new Blob(["\uFEFF" + csvContent.join("\n")], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     
-    // Nome do arquivo: escala_7gb_2026-11.csv
     const competencia = D.competencia ? D.competencia.slice(0, 7) : "escala";
     link.setAttribute("href", url);
     link.setAttribute("download", `escala_7gb_${competencia}.csv`);
