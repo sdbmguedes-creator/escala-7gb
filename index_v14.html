@@ -198,14 +198,41 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
 #cmtBox .cmtRow button.danger{background:#b02a37;color:#fff;border-color:#b02a37}
 #cmtBox .cmtRow button:disabled{opacity:.5;cursor:not-allowed}
 @media print {
-  @page { size: landscape; margin: 10mm; }
-  body { padding-top: 0; background: #fff; }
-  header, nav, .acoes, #toast, #menu, .confBar, .opControlBar { display: none !important; }
-  main { padding: 0; width: 100%; overflow: visible; }
-  table { page-break-inside: auto; width: 100% !important; }
-  tr { page-break-inside: avoid; page-break-after: auto; }
-  th, td { font-size: 10px !important; padding: 2px 4px !important; border: 1px solid #ccc !important; }
-  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  @page { size: landscape; margin: 8mm; }
+  html, body { 
+    padding: 0 !important; 
+    margin: 0 !important; 
+    overflow: visible !important; 
+    background: #fff; 
+  }
+  header, nav, .acoes, #toast, #menu, .confBar, .opControlBar, .confFilterBar { 
+    display: none !important; 
+  }
+  main { 
+    padding: 0 !important; 
+    margin: 0 auto !important; 
+    width: 100% !important; 
+    overflow: visible !important; 
+    max-width: none !important;
+  }
+  table { 
+    page-break-inside: auto; 
+    width: 100% !important; 
+    margin: 0 auto !important;
+  }
+  tr { 
+    page-break-inside: avoid; 
+    page-break-after: auto; 
+  }
+  th, td { 
+    font-size: 10px !important; 
+    padding: 2px 4px !important; 
+    border: 1px solid #ccc !important; 
+  }
+  * { 
+    -webkit-print-color-adjust: exact !important; 
+    print-color-adjust: exact !important; 
+  }
 }
 
 </style></head><body>
@@ -684,46 +711,42 @@ function exportar(){
 function exportarCSV() {
   try {
     let csv = [];
-    // Cabeçalho da planilha (separado por ponto e vírgula)
     csv.push('"Competencia";"Data";"Dia";"Secao";"Posto";"Militar";"Escala";"Marcacao"');
-
-    // Pega a competência atual (ex: 2026-11)
+    
     const competencia = D.competencia ? D.competencia.slice(0, 7) : "2026-11";
     
-    // Precisamos varrer o elenco de militares. 
-    // A variável global que guarda o cadastro é a "D.mes" (ou elenco no estado)
-    const elenco = (typeof elenco !== 'undefined' && elenco) ? elenco : D.mes;
+    // Correção do erro: usar um nome de variável diferente para não conflitar
+    let listaMilitar = [];
+    if (typeof elenco !== 'undefined' && elenco && elenco.length > 0) {
+      listaMilitar = elenco;
+    } else if (typeof D !== 'undefined' && D.mes) {
+      listaMilitar = D.mes;
+    }
 
-    if (!elenco || !Array.isArray(elenco)) {
+    if (!listaMilitar || listaMilitar.length === 0) {
       alert("Erro: Lista de militares não encontrada no sistema.");
       return;
     }
 
-    // Para cada militar no elenco
-    elenco.forEach(m => {
+    listaMilitar.forEach(m => {
       const pessoa = D.pessoas.find(p => p.id === m.id);
       const posto = pessoa ? pessoa.posto : "";
       const nome = pessoa ? pessoa.nome : m.id;
       const secao = m.secao || "";
-
-      // A chave das marcas no sistema é "SECAO|ID|DATA"
-      // Vamos procurar todas as marcações desse militar
       const prefixo = secao + "|" + m.id + "|";
       
       for (const chave in marks) {
         if (chave.startsWith(prefixo)) {
-          const dataCompleta = chave.split("|")[2]; // Ex: 2026-11-04
-          const dia = parseInt(dataCompleta.split("-")[2], 10); // Ex: 4
-          const marcacao = marks[chave]; // Ex: "X", "PJ", "N"
-
-          // Limpa a string para não quebrar o CSV
+          const dataCompleta = chave.split("|")[2];
+          const dia = parseInt(dataCompleta.split("-")[2], 10);
+          const marcacao = marks[chave];
+          
           const linha = `"${competencia}";"${dataCompleta}";"${dia}";"${secao}";"${posto}";"${nome}";"${m.escala}";"${marcacao}"`;
           csv.push(linha);
         }
       }
     });
 
-    // Junta tudo e força o Excel a ler os acentos corretos (\uFEFF)
     const blob = new Blob(["\uFEFF" + csv.join("\n")], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
