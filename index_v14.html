@@ -198,41 +198,36 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
 #cmtBox .cmtRow button.danger{background:#b02a37;color:#fff;border-color:#b02a37}
 #cmtBox .cmtRow button:disabled{opacity:.5;cursor:not-allowed}
 @media print {
-  @page { size: landscape; margin: 8mm; }
-  html, body { 
-    padding: 0 !important; 
-    margin: 0 !important; 
-    overflow: visible !important; 
-    background: #fff; 
-  }
-  header, nav, .acoes, #toast, #menu, .confBar, .opControlBar, .confFilterBar { 
-    display: none !important; 
-  }
-  main { 
-    padding: 0 !important; 
-    margin: 0 auto !important; 
-    width: 100% !important; 
-    overflow: visible !important; 
-    max-width: none !important;
-  }
-  table { 
-    page-break-inside: auto; 
-    width: 100% !important; 
-    margin: 0 auto !important;
-  }
-  tr { 
-    page-break-inside: avoid; 
-    page-break-after: auto; 
-  }
-  th, td { 
-    font-size: 10px !important; 
-    padding: 2px 4px !important; 
-    border: 1px solid #ccc !important; 
-  }
-  * { 
+  @page { size: landscape; margin: 5mm; }
+  
+  /* O SEGREDO: Reduz a tela em 35% para caber todos os dias e a coluna PIES na folha A4 */
+  body { 
+    zoom: 0.65 !important; 
     -webkit-print-color-adjust: exact !important; 
     print-color-adjust: exact !important; 
   }
+  
+  header, nav, .acoes, #toast, #menu, .confBar, .opControlBar, .confFilterBar { 
+    display: none !important; 
+  }
+  
+  main { 
+    padding: 0 !important; 
+    margin: 0 !important; 
+    width: 100% !important; 
+    overflow: visible !important; 
+  }
+  
+  /* Desativa o max-content que estava forçando a tabela a vazar da folha */
+  main > table, table.gradeSb, table.aco, table.diario { 
+    width: 100% !important; 
+    max-width: 100% !important; 
+    table-layout: auto !important; 
+    page-break-inside: auto; 
+  }
+  
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  th, td { font-size: 11px !important; padding: 1px 2px !important; border: 1px solid #ccc !important; }
 }
 
 </style></head><body>
@@ -711,40 +706,95 @@ function exportar(){
 function exportarCSV() {
   try {
     let csv = [];
-    csv.push('"Competencia";"Data";"Dia";"Secao";"Posto";"Militar";"Escala";"Marcacao"');
-    
     const competencia = D.competencia ? D.competencia.slice(0, 7) : "2026-11";
+    const [ano, mes] = competencia.split('-');
+    const ultimoDia = new Date(ano, mes, 0).getDate();
     
-    // Correção do erro: usar um nome de variável diferente para não conflitar
-    let listaMilitar = [];
-    if (typeof elenco !== 'undefined' && elenco && elenco.length > 0) {
-      listaMilitar = elenco;
-    } else if (typeof D !== 'undefined' && D.mes) {
-      listaMilitar = D.mes;
+    // Cabeçalho das colunas
+    let cabecalho = ['"Militar"', '"Posto"', '"Escala"'];
+    for (let d = 1; d <= ultimoDia; d++) {
+        cabecalho.push('"' + String(d).padStart(2, '0') + '"');
     }
+    cabecalho.push('"PIES"'); // Extra
+    
+    const listaMilitar = (typeof elenco !== 'undefined' && elenco) ? elenco : (D.mes || []);
+    
+    // Grupos que aparecem na tela
+    const grupos = [
+        { id: "ACO", nome: "ACO" },
+        { id: "1ªSB", nome: "1ªSB — OPERACIONAL" },
+        { id: "ADM:1ªSB", nome: "1ªSB — ADMINISTRATIVO (ADM)" },
+        { id: "host:1ªSB", nome: "1ªSB — VISITANTES" },
+        { id: "2ªSB", nome: "2ªSB — OPERACIONAL" },
+        { id: "ADM:2ªSB", nome: "2ªSB — ADMINISTRATIVO (ADM)" },
+        { id: "host:2ªSB", nome: "2ªSB — VISITANTES" },
+        { id: "3ªSB", nome: "3ªSB — OPERACIONAL" },
+        { id: "ADM:3ªSB", nome: "3ªSB — ADMINISTRATIVO (ADM)" },
+        { id: "host:3ªSB", nome: "3ªSB — VISITANTES" },
+        { id: "4ªSB", nome: "4ªSB — OPERACIONAL" },
+        { id: "ADM:4ªSB", nome: "4ªSB — ADMINISTRATIVO (ADM)" },
+        { id: "host:4ªSB", nome: "4ªSB — VISITANTES" }
+    ];
 
-    if (!listaMilitar || listaMilitar.length === 0) {
-      alert("Erro: Lista de militares não encontrada no sistema.");
-      return;
-    }
-
-    listaMilitar.forEach(m => {
-      const pessoa = D.pessoas.find(p => p.id === m.id);
-      const posto = pessoa ? pessoa.posto : "";
-      const nome = pessoa ? pessoa.nome : m.id;
-      const secao = m.secao || "";
-      const prefixo = secao + "|" + m.id + "|";
-      
-      for (const chave in marks) {
-        if (chave.startsWith(prefixo)) {
-          const dataCompleta = chave.split("|")[2];
-          const dia = parseInt(dataCompleta.split("-")[2], 10);
-          const marcacao = marks[chave];
-          
-          const linha = `"${competencia}";"${dataCompleta}";"${dia}";"${secao}";"${posto}";"${nome}";"${m.escala}";"${marcacao}"`;
-          csv.push(linha);
+    grupos.forEach(g => {
+        let mils = [];
+        // Filtra quem pertence a cada aba
+        if (g.id === "ACO") {
+            mils = listaMilitar.filter(m => D.aco && D.aco.includes(m.id));
+        } else if (g.id.startsWith("ADM:")) {
+            const secao = g.id.split(":")[1];
+            mils = listaMilitar.filter(m => m.secao === secao && m.adm === "S");
+        } else if (g.id.startsWith("host:")) {
+            const secao = g.id.split(":")[1];
+            const visIds = D.vis && D.vis[secao] ? D.vis[secao] : [];
+            mils = listaMilitar.filter(m => visIds.includes(m.id));
+        } else {
+            const secao = g.id;
+            const visIds = D.vis && D.vis[secao] ? D.vis[secao] : [];
+            mils = listaMilitar.filter(m => m.secao === secao && m.adm !== "S" && !visIds.includes(m.id));
         }
-      }
+
+        if (mils.length === 0 && g.id !== "ACO") return; // Se a aba estiver vazia, pula
+
+        // Título da seção
+        csv.push(`"--- ${g.nome} ---"`);
+        csv.push(cabecalho.join(";"));
+
+        // Se for ACO, cria uma linha especial para os oficiais
+        if (g.id === "ACO") {
+            let linhaOf1 = ['"Oficial 1º T"', '""', '""'];
+            let linhaOf2 = ['"Oficial 2º T"', '""', '""'];
+            for (let d = 1; d <= ultimoDia; d++) {
+                const diaStr = String(d).padStart(2, '0');
+                linhaOf1.push(`"${(D.acoOficiais && D.acoOficiais[diaStr] && D.acoOficiais[diaStr].t1) || ""}"`);
+                linhaOf2.push(`"${(D.acoOficiais && D.acoOficiais[diaStr] && D.acoOficiais[diaStr].t2) || ""}"`);
+            }
+            linhaOf1.push('""'); linhaOf2.push('""');
+            csv.push(linhaOf1.join(";"));
+            csv.push(linhaOf2.join(";"));
+        }
+
+        // Linhas dos militares
+        mils.forEach(m => {
+            const pessoa = D.pessoas.find(p => p.id === m.id);
+            const nome = pessoa ? pessoa.nome : m.id;
+            const posto = pessoa ? pessoa.posto : "";
+            
+            let linha = [`"${nome}"`, `"${posto}"`, `"${m.escala}"`];
+            
+            for (let d = 1; d <= ultimoDia; d++) {
+                const diaStr = String(d).padStart(2, '0');
+                const dataFull = `${competencia}-${diaStr}`;
+                const chave = `${g.id}|${m.id}|${dataFull}`;
+                const val = marks[chave] || "";
+                linha.push(`"${val}"`);
+            }
+            
+            linha.push(`""`); // Coluna PIES em branco por enquanto
+            csv.push(linha.join(";"));
+        });
+        
+        csv.push(""); // Linha em branco entre seções
     });
 
     const blob = new Blob(["\uFEFF" + csv.join("\n")], { type: 'text/csv;charset=utf-8;' });
@@ -752,7 +802,7 @@ function exportarCSV() {
     const url = URL.createObjectURL(blob);
     
     link.setAttribute("href", url);
-    link.setAttribute("download", `escala_plana_${competencia}.csv`);
+    link.setAttribute("download", `escala_completa_${competencia}.csv`);
     link.style.visibility = 'hidden';
     
     document.body.appendChild(link);
