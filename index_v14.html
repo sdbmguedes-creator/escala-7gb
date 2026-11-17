@@ -683,51 +683,53 @@ function exportar(){
 
 function exportarCSV() {
   try {
-    const main = document.getElementById("main");
-    // Pega TODAS as tabelas que estão na tela (tanto o resumo quanto as escalas)
-    const tabelas = main.querySelectorAll("table");
+    let csv = [];
+    // Cabeçalho da planilha (separado por ponto e vírgula)
+    csv.push('"Competencia";"Data";"Dia";"Secao";"Posto";"Militar";"Escala";"Marcacao"');
+
+    // Pega a competência atual (ex: 2026-11)
+    const competencia = D.competencia ? D.competencia.slice(0, 7) : "2026-11";
     
-    if (!tabelas || tabelas.length === 0) {
-      alert("Nenhuma tabela encontrada na tela para exportar.");
+    // Precisamos varrer o elenco de militares. 
+    // A variável global que guarda o cadastro é a "D.mes" (ou elenco no estado)
+    const elenco = (typeof elenco !== 'undefined' && elenco) ? elenco : D.mes;
+
+    if (!elenco || !Array.isArray(elenco)) {
+      alert("Erro: Lista de militares não encontrada no sistema.");
       return;
     }
 
-    let csvContent = [];
+    // Para cada militar no elenco
+    elenco.forEach(m => {
+      const pessoa = D.pessoas.find(p => p.id === m.id);
+      const posto = pessoa ? pessoa.posto : "";
+      const nome = pessoa ? pessoa.nome : m.id;
+      const secao = m.secao || "";
 
-    // Itera sobre cada tabela encontrada
-    for (let t = 0; t < tabelas.length; t++) {
-      const tabela = tabelas[t];
-      const linhas = tabela.querySelectorAll("tr");
+      // A chave das marcas no sistema é "SECAO|ID|DATA"
+      // Vamos procurar todas as marcações desse militar
+      const prefixo = secao + "|" + m.id + "|";
       
-      for (let i = 0; i < linhas.length; i++) {
-        let colunas = linhas[i].querySelectorAll("td, th");
-        
-        // Pula linhas vazias ou de título gigante (colspan)
-        if (colunas.length <= 1) continue;
-        
-        let linhaDados = [];
-        for (let j = 0; j < colunas.length; j++) {
-          let texto = colunas[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").trim();
-          texto = texto.replace(/"/g, '""');
-          linhaDados.push('"' + texto + '"');
+      for (const chave in marks) {
+        if (chave.startsWith(prefixo)) {
+          const dataCompleta = chave.split("|")[2]; // Ex: 2026-11-04
+          const dia = parseInt(dataCompleta.split("-")[2], 10); // Ex: 4
+          const marcacao = marks[chave]; // Ex: "X", "PJ", "N"
+
+          // Limpa a string para não quebrar o CSV
+          const linha = `"${competencia}";"${dataCompleta}";"${dia}";"${secao}";"${posto}";"${nome}";"${m.escala}";"${marcacao}"`;
+          csv.push(linha);
         }
-        csvContent.push(linhaDados.join(";"));
       }
-      
-      // Adiciona 3 linhas em branco entre uma tabela e outra (para não virar bagunça no Excel)
-      csvContent.push("");
-      csvContent.push("");
-      csvContent.push("");
-    }
+    });
 
-    // \uFEFF é o BOM que força o Excel a ler os acentos corretamente
-    const blob = new Blob(["\uFEFF" + csvContent.join("\n")], { type: 'text/csv;charset=utf-8;' });
+    // Junta tudo e força o Excel a ler os acentos corretos (\uFEFF)
+    const blob = new Blob(["\uFEFF" + csv.join("\n")], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     
-    const competencia = D.competencia ? D.competencia.slice(0, 7) : "escala";
     link.setAttribute("href", url);
-    link.setAttribute("download", `escala_7gb_${competencia}.csv`);
+    link.setAttribute("download", `escala_plana_${competencia}.csv`);
     link.style.visibility = 'hidden';
     
     document.body.appendChild(link);
@@ -740,7 +742,6 @@ function exportarCSV() {
     alert("Erro ao gerar CSV: " + e.message);
   }
 }
-
 // Validação do arquivo a importar: formas esperadas de marks/mes/vis/aco.
 function validarEstado(j){
   const erros = [];
