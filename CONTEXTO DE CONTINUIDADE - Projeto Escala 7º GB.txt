@@ -135,6 +135,11 @@ Atualizado: 2026-11-15
 ✅ Endpoints corrigidos (DELETE com params em vez de body):
    - _logout, _revogar_usuario, _encerrar_sessoes
 
+✅ FEATURE — Exportação CSV e Impressão PDF
+   - Função exportarCSV() gera uma planilha em grade com todas as seções 
+     (ACO, 1ªSB a 4ªSB, ADM, Visitantes) lendo o estado real do sistema.
+   - CSS @media print configurado com zoom (0.60) e paisagem (landscape)
+     para imprimir a escala inteira no papel sem cortar as colunas.
 
 ═══════════════════════════════════════════════════════════════════════════════
 4) ESTRUTURA DE ARQUIVOS
@@ -159,16 +164,14 @@ Atualizado: 2026-11-15
    - Criar rota /logs no backend (apenas Admin/Mestre).
    - Criar interface "Auditoria" no frontend (listar os 200 logs mais recentes).
 
-🟢 FEATURES FUTURAS
-   - Log de movimentação e afastamento de militar com interface visual.
-   - Relatórios PDF/CSV.
-   - Notificações / PWA (instalável e offline).
+🟢 FEATURES FUTURAS (Ideias levantadas)
+   - Auditoria de Dados: Log de movimentação e afastamento de militar (tela).
+   - Notificações / PWA (instalável no celular e funcionando offline).
+   - Novas telas e fluxos de escala.
 
 🟢 EVOLUÇÃO TÉCNICA
    - Controle de concorrência otimista no _push (versao_esperada / merge
-     por ts). Hoje dois devices editando a MESMA marca no mesmo segundo:
-     last-write-wins. Aceitável, mas pode evoluir.
-
+     por ts).
 
 ═══════════════════════════════════════════════════════════════════════════════
 6) COMANDOS ÚTEIS
