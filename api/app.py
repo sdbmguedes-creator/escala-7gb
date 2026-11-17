@@ -81,7 +81,48 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        
+        # Se a requisição for para um arquivo estático do PWA, serve ele diretamente
+        if path in ("/manifest.json", "/sw.js") or path.startswith("/icon-"):
+            self._serve_estatico(path.lstrip("/"))
+            return
+            
+        # Caso contrário, serve a página principal
         self._serve_index()
+
+    # ---------- arquivos estáticos (PWA) ----------
+    def _serve_estatico(self, arquivo):
+        # Define o tipo correto para cada arquivo
+        if arquivo.endswith(".json"):
+            content_type = "application/json"
+        elif arquivo.endswith(".js"):
+            content_type = "application/javascript"
+        elif arquivo.endswith(".png"):
+            content_type = "image/png"
+        else:
+            content_type = "application/octet-stream"
+
+        file_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            arquivo,
+        )
+        
+        try:
+            with open(file_path, "rb") as f:
+                corpo = f.read()
+        except FileNotFoundError:
+            self.send_response(404)
+            self.end_headers()
+            return
+            
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(corpo)))
+        self.end_headers()
+        self.wfile.write(corpo)
 
     # ---------- index ----------
     def _serve_index(self):
