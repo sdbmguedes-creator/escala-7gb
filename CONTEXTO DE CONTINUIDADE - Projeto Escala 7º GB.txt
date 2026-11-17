@@ -207,14 +207,17 @@ Atualizado: 2026-11-15
    - Criar rota /logs no backend (apenas Admin/Mestre).
    - Criar interface "Auditoria" no frontend (listar os 200 logs mais recentes).
 
-🟢 FEATURES FUTURAS
-   - Notificações Push (ex: avisar o militar no celular quando a escala mudar).
-   - Relatórios PDF/CSV mais avançados (dashboards de estatísticas).
-   - Log de alterações e afastamentos (evoluir a tela de auditoria).
+🟢 FEATURES FUTURAS (Fase 5 e além)
+   - Notificações Push (PWA) para avisar militares sobre alterações na escala.
+   - Dashboards estatísticos de faltas e serviços.
 
-🟢 EVOLUÇÃO TÉCNICA
-   - Controle de concorrência otimista no _push (versao_esperada / merge
-     por ts).
+🟢 EVOLUÇÃO TÉCNICA AVANÇADA (Baixa prioridade)
+   - Controle de concorrência otimista no _push (merge por ts). 
+     Hoje o sistema usa Last-Write-Wins. A chance de dois usuários 
+     editarem a MESMA marca no MESMO segundo é mínima, e o custo de 
+     implementação (tratamento de conflitos no front e back) não se 
+     justifica para o volume de 5 usuários simultâneos. Deixar para o 
+     futuro caso a equipe cresça muito.
 
 ═══════════════════════════════════════════════════════════════════════════════
 6) COMANDOS ÚTEIS
