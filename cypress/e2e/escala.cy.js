@@ -6,7 +6,7 @@ describe('Testes do App Escala 7GB', () => {
     cy.visit('https://escala-7gb.vercel.app');
     
     // Verifica se a tela de PIN apareceu
-    cy.get('#telaPin').should('exist');
+    cy.get('#botaoQueNaoExiste').should('exist');
     cy.get('#pinInput').should('be.visible');
   });
 
