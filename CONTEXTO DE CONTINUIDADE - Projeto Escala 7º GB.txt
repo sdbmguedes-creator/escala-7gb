@@ -183,6 +183,14 @@ Atualizado: 2026-11-15
      a internet volta. A fila de operações pendentes é enviada automaticamente.
    - O tempo de bloqueio de interação caiu de 3s para 1s.
 
+✅ FASE QA — Suíte de Testes Automatizados
+   - Backend: Pytest configurado em 'api/tests/test_api.py'. Valida 
+     bloqueio de PIN errado, push sem token e acesso indevido à auditoria.
+     Para rodar: python -m pytest api/tests/ -v
+   - Frontend: Cypress configurado em 'cypress/e2e/escala.cy.js'. Valida 
+     tela de PIN, mensagem de erro e login com sucesso.
+     Para rodar: npx cypress run --browser chrome
+   - node_modules e pastas de vídeo do Cypress adicionados ao .gitignore.
 
 ═══════════════════════════════════════════════════════════════════════════════
 4) ESTRUTURA DE ARQUIVOS
@@ -236,6 +244,11 @@ JSON.parse(localStorage.getItem('escala7gb-fila') || '[]').length  // ops penden
 JSON.parse(localStorage.getItem('escala7gb-sessao')).token         // token
 JSON.parse(localStorage.getItem('escala7gb-fila') || '[]')         // fila pendente
 
+# Rodar testes do backend (API)
+python -m pytest api/tests/ -v
+
+# Rodar testes do frontend (Interface)
+npx cypress run --browser chrome
 
 ═══════════════════════════════════════════════════════════════════════════════
 7) LIÇÕES APRENDIDAS
