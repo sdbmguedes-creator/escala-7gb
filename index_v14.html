@@ -1344,6 +1344,7 @@ const Sync = {
   flush: async function(){
     if (!Sync.ligado || !Sync.fila.length) return;
     if (Sync.estado === "enviando") return;
+    if (Sync.estado === "erro-fatal") return;   // só destrava via descartarFila()/manual
 
     Sync.estado = "enviando"; Sync.pintar();
 
@@ -1357,15 +1358,29 @@ const Sync = {
       for (var ym in porMes){
         var r = await Transport.call("apiPush", [ym, porMes[ym], Sessao.token]);
 
-        // lote inválido (recusado por regra, não por rede): DESCARTA.
-        // Devolver à fila faria ele falhar para sempre, a cada abertura.
+        // ─────────── DEPOIS ───────────
+        // FIX: lote recusado por REGRA (limite de deletes). NÃO descartar —
+        // descartar fazia o usuário perder a deleção silenciosamente
+        // (ele achava que apagou, o banco continuava com as marcas).
+        // Restaura o lote à fila e bloqueia retry automático até ação manual.
         if (r && r.fatal){
-          console.error("[sync] lote descartado (", ym, "):", r.erro);
+          console.error("[sync] lote RECUSADO (", ym, "):", r.erro);
+          // Devolve só o lote deste mês (outros meses podem ter ido bem).
+          var loteMes = lote.filter(function(it){ return it.ym === ym; });
+          Sync.fila = loteMes.concat(Sync.fila);
+          Sync.guardarFila();
           Sync.recusadas = [{ motivo: r.erro }];
-          Sync.estado = "erro";
+          Sync.estado = "erro-fatal";
           Sync.ultimoErro = r.erro;
           mostrarRecusas();
-          continue;
+          try {
+            alert("⚠️ Servidor recusou o lote:\n\n" + r.erro +
+                  "\n\nSuas operações pendentes NÃO foram aplicadas.\n\n" +
+                  "Para recuperar, abra o console (F12) e execute:\n" +
+                  "  Sync.descartarFila()   // descarta e continua\n" +
+                  "  Sync.estado='ok'; Sync.flush()  // tenta de novo após o adm aumentar o limite");
+          } catch(e){}
+          return;   // aborta este flush (não processa próximos meses)
         }
 
         if (!r || !r.ok) throw new Error((r && r.erro) || "push falhou");
@@ -1388,7 +1403,7 @@ const Sync = {
   },
 
   /** Descarta a fila local. Use quando um lote inválido ficar preso. */
-  descartarFila: function(){
+ descartarFila: function(){
     var n = Sync.pendentes();
     Sync.fila = [];
     Sync.estado = "ok";
@@ -5662,15 +5677,15 @@ async function atualizarDoServidor(ym){
   if (Sync.fila.length) return;
   if (Date.now() - _ultimaInteracao < 1000) return; // Reduzido de 3s para 1s
 
-  var versaoAntes = Sync.versao;
+// ─────────── DEPOIS ───────────
   var r = await Transport.call("apiPull", [ym, Sessao.token, Sync.versao]).catch(function(){ return null; });
   if (!r || !r.ok || r.semMudanca || !r.marcas) return;
-  // Se já aplicamos algo nesta sessão E a versão não mudou, não há
-  // nada de novo: pula aplicar + log (evita o spam de 5s).
-  // _ultimaRemota = 0 só na 1ª vez desde o load, garantindo o pull inicial
-  // mesmo quando servidor e cliente estão ambos em versao 0.
-  if (_ultimaRemota > 0 && r.versao === versaoAntes) return;
-
+  // FIX RACE: comparar com Sync.versao ATUAL, não com cópia capturada antes
+  // do await. Se um push local rodou durante o pull, aplicar esse payload
+  // regride o estado → tela pisca, marcas "voltam". Regra: só aceita
+  // payload ESTRITAMENTE mais novo. Respostas atrasadas são descartadas.
+  if (Sync.versao !== null && r.versao < Sync.versao) return;
+  if (_ultimaRemota > 0 && r.versao === Sync.versao) return;
     aplicarRemoto(estadoDoServidor(r), ym);
   Sync.versao = r.versao;
   _ultimaRemota = Date.now();
