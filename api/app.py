@@ -65,7 +65,11 @@ def pode_gravar(perfil, grupo, militar_id, elenco_map):
 
 PERFIS_VALIDOS = ["Admin", "Mestre", "1ªSB", "2ªSB", "3ªSB", "4ªSB"]
 SBS_VALIDAS = ["1ªSB", "2ªSB", "3ªSB", "4ªSB"]
-LIMITE_DELETES = 60
+# ─────────── DEPOIS ───────────
+# Limite alto o bastante para uma limpeza legítima (um mês tem ~120 militares
+# × ~30 dias; uma limpeza real pode passar de 200). Continua como rede de
+# segurança contra bug que esvazie o estado inteiro de uma vez.
+LIMITE_DELETES = 500
 
 
 # ============================================================
@@ -911,7 +915,7 @@ class Handler(BaseHTTPRequestHandler):
             # Incrementa versão SEMPRE que algo foi aplicado (para o pull detectar)
             if aplicadas > 0:
                 meta_alterada = True
-            versao_final = (meta_versao + 1) if meta_alterada else meta_versao
+            versao_final = meta_versao
 
             if meta_alterada:
                 try:
@@ -926,6 +930,7 @@ class Handler(BaseHTTPRequestHandler):
                         },
                         extra_headers={"Prefer": "resolution=merge-duplicates"},
                     )
+                    versao_final = meta_versao + 1
                 except Exception as e:
                     print(f"[push/meta] erro: {e}")
 
