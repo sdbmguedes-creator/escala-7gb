@@ -32,3 +32,7 @@ trecho_*.txt
 escala-*-OK_SYNC.json
 de dispatch*
 escala-2026-11_OK_SYNC.json
+
+node_modules/
+cypress/videos/
+cypress/screenshots/

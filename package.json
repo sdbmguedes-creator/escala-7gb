@@ -1,0 +1,27 @@
+{
+  "name": "projeto-escala-supabase",
+  "version": "1.0.0",
+  "description": "",
+  "main": "sw.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sdbmguedes-creator/escala-7gb.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/sdbmguedes-creator/escala-7gb/issues"
+  },
+  "homepage": "https://github.com/sdbmguedes-creator/escala-7gb#readme",
+  "devDependencies": {
+    "cypress": "^16.3.0"
+  }
+}
