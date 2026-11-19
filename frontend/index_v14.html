@@ -1309,7 +1309,8 @@ const Sync = {
     if (Sync.ligado){
       if (Sync.fila.length) Sync.flush();          // sobe o que ficou pendente de outra sessão
       window.addEventListener("online", function(){ Sync.flush(); });
-      setInterval(function(){ if (Sync.fila.length) Sync.flush(); }, 60000);
+      // Flush periódico: apenas a cada 5 minutos (reduzido de 60s)
+      setInterval(function(){ if (Sync.fila.length) Sync.flush(); }, 300000);
     }
   },
 
@@ -5657,8 +5658,8 @@ function aplicarRemoto(remoto, ym){
    5 s com atividade recente · 30 s ocioso · nada com a aba oculta.
    Cada consulta é uma execução no Apps Script: 5 s fixo estouraria a cota. */
 var _ultimaInteracao = 0, _ultimaRemota = 0, _pollTimer = null, _pollTick = 0;
-// Otimização Fase 4: Polling a cada 2s (ativo). Ocioso a cada 30s. Janela de 5 min.
-var PULL_ATIVO_MS = 2000, PULL_OCIOSO_TICKS = 15, JANELA_ATIVO_MS = 300000;
+// Polling otimizado: 30s ativo, 5min ocioso, janela 10min. Evita egress excessivo.
+var PULL_ATIVO_MS = 30000, PULL_OCIOSO_TICKS = 10, JANELA_ATIVO_MS = 600000;
 function _marcarInteracao(){ _ultimaInteracao = Date.now(); }
 document.addEventListener("pointerdown", _marcarInteracao, true);
 document.addEventListener("keydown", _marcarInteracao, true);
