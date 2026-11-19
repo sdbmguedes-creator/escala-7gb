@@ -1,13 +1,17 @@
 {
   "name": "projeto-escala-supabase",
   "version": "1.0.0",
-  "description": "",
+  "description": "PWA com Supabase backend",
   "main": "sw.js",
   "directories": {
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "npx serve -s frontend",
+    "build": "echo 'Build step would be here'",
+    "test": "vitest run",
+    "test:e2e": "cypress run",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
   },
   "repository": {
     "type": "git",
@@ -16,12 +20,14 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/sdbmguedes-creator/escala-7gb/issues"
   },
   "homepage": "https://github.com/sdbmguedes-creator/escala-7gb#readme",
+  "type": "commonjs",
   "devDependencies": {
-    "cypress": "^16.3.0"
+    "cypress": "^16.3.0",
+    "eslint": "^10.15.0",
+    "vitest": "^5.1.1"
   }
 }

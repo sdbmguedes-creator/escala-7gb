@@ -1,4 +1,4 @@
-const CACHE_NAME = 'escala7gb-v1';
+const CACHE_NAME = 'escala7gb-v2-' + new Date().toISOString().split('T')[0];
 const ASSETS = [
   '/',
   '/index_v14.html',
@@ -26,24 +26,22 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// 3. Intercepta as requisições
+// 3. Intercepta as requisições com Stale-While-Revalidate para maior performance
 self.addEventListener('fetch', (e) => {
-  // REQUISIÇÕES DE API (Vercel/Supabase): Network First. Se falhar, o app lida com isso localmente.
   if (e.request.url.includes('/api/')) {
-    return; 
+    return;
   }
-  
-  // ARQUIVOS ESTÁTICOS (HTML, Ícones): Cache First. Se tiver no cache, abre na hora (offline).
+
   e.respondWith(
     caches.match(e.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Atualiza o cache em background enquanto o usuário usa a versão salva
-        fetch(e.request).then((networkResponse) => {
-          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, networkResponse));
-        }).catch(() => {});
-        return cachedResponse;
-      }
-      return fetch(e.request);
+      const fetchPromise = fetch(e.request).then((networkResponse) => {
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(e.request, networkResponse.clone());
+        });
+        return networkResponse;
+      }).catch(() => {});
+
+      return cachedResponse || fetchPromise;
     })
   );
 });

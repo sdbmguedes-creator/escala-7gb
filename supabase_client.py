@@ -5,20 +5,28 @@ import urllib.error
 import urllib.parse
 
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+def _get_supabase_config():
+    url = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
+    key = (os.environ.get("SUPABASE_ANON_KEY") or "").strip()
+    if not url:
+        raise RuntimeError("Variável de ambiente SUPABASE_URL não configurada.")
+    if not key:
+        raise RuntimeError("Variável de ambiente SUPABASE_ANON_KEY não configurada.")
+    return url, key
 
 
 def sb_request(method, path, params=None, body=None, extra_headers=None):
     """Faz requisição REST para o Supabase."""
-    url = f"{SUPABASE_URL}/rest/v1/{path}"
+    supabase_url, supabase_key = _get_supabase_config()
+    clean_path = path.lstrip("/")
+    url = f"{supabase_url}/rest/v1/{clean_path}"
     if params:
         qs = urllib.parse.urlencode(params)
         url += "?" + qs
 
     headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json",
         "Prefer": "return=representation",
     }
