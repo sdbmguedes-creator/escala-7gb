@@ -9,6 +9,7 @@
   "scripts": {
     "start": "npx serve -s frontend",
     "build": "echo 'Build step would be here'",
+    "test": "vitest run",
     "test:e2e": "cypress run",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
   },
