@@ -131,9 +131,10 @@ class Handler(BaseHTTPRequestHandler):
     # ---------- index ----------
     def _serve_index(self):
         html_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "index_v14.html",
-        )
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "frontend",
+    "index_v14.html",
+)
         try:
             with open(html_path, "r", encoding="utf-8") as f:
                 conteudo = f.read()
