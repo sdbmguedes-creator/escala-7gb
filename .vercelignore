@@ -1,0 +1,10 @@
+# Documentação e notas de apoio
+*.md
+!README.md
+
+# Testes e configurações locais/CI
+tests/
+cypress/
+cypress.config.js
+eslint.config.js
+tsconfig.json
