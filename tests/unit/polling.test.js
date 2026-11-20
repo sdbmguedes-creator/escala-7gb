@@ -26,11 +26,12 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
     global._pollTimer = null;
     global._pollTick = 0;
     global._ultimaInteracao = 0;
-    global._ultimaRemota = 0;
+    global._ultimaRemotaPorYm = {};
     global.Sync = {
       ligado: true,
       fila: [],
       estado: 'ok',
+      versaoPorYm: {},
       carregarFila: () => {},
       guardarFila: () => {},
       pintar: () => {},
@@ -124,12 +125,13 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       const atualizarDoServidor = vi.fn();
       _pollTick = 0;
       _ultimaInteracao = Date.now(); // Interação agora
-      _ultimaRemota = 0;
+      _ultimaRemotaPorYm['2026-11'] = 0;
 
       // Simular 5 ticks
       for (let i = 0; i < 5; i++) {
         _pollTick++;
-        var recente = (Date.now() - Math.max(_ultimaInteracao, _ultimaRemota)) < JANELA_ATIVO_MS;
+        var ultimaRemotaYm = _ultimaRemotaPorYm['2026-11'] || 0;
+        var recente = (Date.now() - Math.max(_ultimaInteracao, ultimaRemotaYm)) < JANELA_ATIVO_MS;
         if (!recente && (_pollTick % PULL_OCIOSO_TICKS) !== 0) {
           continue;
         }
@@ -144,12 +146,13 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       const atualizarDoServidor = vi.fn();
       _pollTick = 0;
       _ultimaInteracao = Date.now() - 700000; // 11 min atrás (> JANELA_ATIVO_MS)
-      _ultimaRemota = 0;
+      _ultimaRemotaPorYm['2026-11'] = 0;
 
       // Simular 15 ticks (PULL_OCIOSO_TICKS = 10)
       for (let i = 0; i < 15; i++) {
         _pollTick++;
-        var recente = (Date.now() - Math.max(_ultimaInteracao, _ultimaRemota)) < JANELA_ATIVO_MS;
+        var ultimaRemotaYm = _ultimaRemotaPorYm['2026-11'] || 0;
+        var recente = (Date.now() - Math.max(_ultimaInteracao, ultimaRemotaYm)) < JANELA_ATIVO_MS;
         if (!recente && (_pollTick % PULL_OCIOSO_TICKS) !== 0) {
           continue;
         }
@@ -164,11 +167,12 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       const atualizarDoServidor = vi.fn();
       _pollTick = 0;
       _ultimaInteracao = Date.now() - 700000;
-      _ultimaRemota = 0;
+      _ultimaRemotaPorYm['2026-11'] = 0;
 
       for (let i = 0; i < 5; i++) {
         _pollTick++;
-        var recente = (Date.now() - Math.max(_ultimaInteracao, _ultimaRemota)) < JANELA_ATIVO_MS;
+        var ultimaRemotaYm = _ultimaRemotaPorYm['2026-11'] || 0;
+        var recente = (Date.now() - Math.max(_ultimaInteracao, ultimaRemotaYm)) < JANELA_ATIVO_MS;
         if (!recente && (_pollTick % PULL_OCIOSO_TICKS) !== 0) continue;
         atualizarDoServidor('2026-11');
       }
@@ -188,7 +192,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
 
       // Copiar lógica
       if (!Sync.ligado || document.hidden) return;
-      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versao]);
+      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versaoPorYm['2026-11'] || null]);
 
       expect(Transport.call).not.toHaveBeenCalled();
     });
@@ -200,7 +204,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       global.Transport = Transport;
 
       if (!Sync.ligado || document.hidden) return;
-      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versao]);
+      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versaoPorYm['2026-11'] || null]);
 
       expect(Transport.call).not.toHaveBeenCalled();
     });
@@ -214,7 +218,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
 
       if (!Sync.ligado || document.hidden) return;
       if (Sync.estado === "enviando") return;
-      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versao]);
+      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versaoPorYm['2026-11'] || null]);
 
       expect(Transport.call).not.toHaveBeenCalled();
     });
@@ -230,7 +234,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       if (!Sync.ligado || document.hidden) return;
       if (Sync.estado === "enviando") return;
       if (Sync.fila.length) return;
-      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versao]);
+      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versaoPorYm['2026-11'] || null]);
 
       expect(Transport.call).not.toHaveBeenCalled();
     });
@@ -248,7 +252,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       if (Sync.estado === "enviando") return;
       if (Sync.fila.length) return;
       if (Date.now() - _ultimaInteracao < 1000) return;
-      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versao]);
+      await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versaoPorYm['2026-11'] || null]);
 
       expect(Transport.call).not.toHaveBeenCalled();
     });
@@ -260,9 +264,9 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       document.hidden = false;
       Sync.estado = 'ok';
       Sync.fila = [];
-      Sync.versao = 10;
+      Sync.versaoPorYm['2026-11'] = 10;
       _ultimaInteracao = Date.now() - 5000;
-      _ultimaRemota = 0;
+      _ultimaRemotaPorYm['2026-11'] = 0;
 
       const Transport = {
         call: vi.fn().mockResolvedValue({ ok: true, versao: 5, marcas: [] }) // versão 5 < 10
@@ -279,28 +283,30 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       if (Sync.fila.length) return;
       if (Date.now() - _ultimaInteracao < 1000) return;
 
-      var r = await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versao]);
+      var versaoAtual = Sync.versaoPorYm['2026-11'] || null;
+      var ultimaRemota = _ultimaRemotaPorYm['2026-11'] || 0;
+      var r = await Transport.call("apiPull", ['2026-11', Sessao.token, versaoAtual]);
       if (!r || !r.ok || r.semMudanca || !r.marcas) return;
-      if (Sync.versao !== null && r.versao < Sync.versao) return;
-      if (_ultimaRemota > 0 && r.versao === Sync.versao) return;
+      if (versaoAtual !== null && r.versao < versaoAtual) return;
+      if (ultimaRemota > 0 && r.versao === versaoAtual) return;
       aplicarRemoto(estadoDoServidor(r), '2026-11');
-      Sync.versao = r.versao;
-      _ultimaRemota = Date.now();
+      Sync.versaoPorYm['2026-11'] = r.versao;
+      _ultimaRemotaPorYm['2026-11'] = Date.now();
       desenhar();
 
       expect(Transport.call).toHaveBeenCalled();
       expect(aplicarRemoto).not.toHaveBeenCalled(); // Deve ignorar versão antiga
-      expect(Sync.versao).toBe(10); // Versão não deve mudar
+      expect(Sync.versaoPorYm['2026-11']).toBe(10); // Versão não deve mudar
     });
 
-    it('deve ignorar resposta com mesma versão que _ultimaRemota', async () => {
+    it('deve ignorar resposta com mesma versão que _ultimaRemotaPorYm', async () => {
       Sync.ligado = true;
       document.hidden = false;
       Sync.estado = 'ok';
       Sync.fila = [];
-      Sync.versao = 5;
+      Sync.versaoPorYm['2026-11'] = 5;
       _ultimaInteracao = Date.now() - 5000;
-      _ultimaRemota = Date.now(); // Já teve atualização recente
+      _ultimaRemotaPorYm['2026-11'] = Date.now(); // Já teve atualização recente
 
       const Transport = {
         call: vi.fn().mockResolvedValue({ ok: true, versao: 5, marcas: [] }) // mesma versão
@@ -315,13 +321,15 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       if (Sync.fila.length) return;
       if (Date.now() - _ultimaInteracao < 1000) return;
 
-      var r = await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versao]);
+      var versaoAtual = Sync.versaoPorYm['2026-11'] || null;
+      var ultimaRemota = _ultimaRemotaPorYm['2026-11'] || 0;
+      var r = await Transport.call("apiPull", ['2026-11', Sessao.token, versaoAtual]);
       if (!r || !r.ok || r.semMudanca || !r.marcas) return;
-      if (Sync.versao !== null && r.versao < Sync.versao) return;
-      if (_ultimaRemota > 0 && r.versao === Sync.versao) return;
+      if (versaoAtual !== null && r.versao < versaoAtual) return;
+      if (ultimaRemota > 0 && r.versao === versaoAtual) return;
       aplicarRemoto(estadoDoServidor(r), '2026-11');
-      Sync.versao = r.versao;
-      _ultimaRemota = Date.now();
+      Sync.versaoPorYm['2026-11'] = r.versao;
+      _ultimaRemotaPorYm['2026-11'] = Date.now();
       desenhar();
 
       expect(aplicarRemoto).not.toHaveBeenCalled();
@@ -332,9 +340,9 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       document.hidden = false;
       Sync.estado = 'ok';
       Sync.fila = [];
-      Sync.versao = 5;
+      Sync.versaoPorYm['2026-11'] = 5;
       _ultimaInteracao = Date.now() - 5000;
-      _ultimaRemota = 0;
+      _ultimaRemotaPorYm['2026-11'] = 0;
 
       const Transport = {
         call: vi.fn().mockResolvedValue({ ok: true, versao: 6, marcas: [{}] }) // versão maior
@@ -350,17 +358,19 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       if (Sync.fila.length) return;
       if (Date.now() - _ultimaInteracao < 1000) return;
 
-      var r = await Transport.call("apiPull", ['2026-11', Sessao.token, Sync.versao]);
+      var versaoAtual = Sync.versaoPorYm['2026-11'] || null;
+      var ultimaRemota = _ultimaRemotaPorYm['2026-11'] || 0;
+      var r = await Transport.call("apiPull", ['2026-11', Sessao.token, versaoAtual]);
       if (!r || !r.ok || r.semMudanca || !r.marcas) return;
-      if (Sync.versao !== null && r.versao < Sync.versao) return;
-      if (_ultimaRemota > 0 && r.versao === Sync.versao) return;
+      if (versaoAtual !== null && r.versao < versaoAtual) return;
+      if (ultimaRemota > 0 && r.versao === versaoAtual) return;
       aplicarRemoto(estadoDoServidor(r), '2026-11');
-      Sync.versao = r.versao;
-      _ultimaRemota = Date.now();
+      Sync.versaoPorYm['2026-11'] = r.versao;
+      _ultimaRemotaPorYm['2026-11'] = Date.now();
       desenhar();
 
       expect(aplicarRemoto).toHaveBeenCalled();
-      expect(Sync.versao).toBe(6);
+      expect(Sync.versaoPorYm['2026-11']).toBe(6);
       expect(desenhar).toHaveBeenCalled();
     });
   });
@@ -570,10 +580,10 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       expect(D.movimentos[3].quando).toBe('2026-11-10T08:00:00Z');
     });
 
-    it('deve resetar Sync.versao e _ultimaRemota ao trocar de competência para evitar bloqueio por versão', () => {
+    it('deve usar versão por competência ao trocar de mês (não resetar globalmente)', () => {
       // Simula estado anterior com versão alta em 2026-11
-      const SyncMock = { versao: 42, ligado: true };
-      let _ultimaRemotaMock = 1700000000;
+      const SyncMock = { versaoPorYm: {'2026-11': 42}, ligado: true };
+      let _ultimaRemotaPorYmMock = {'2026-11': 1700000000};
       const D = { competencia: '2026-11-01' };
       const sincronizarMesMock = vi.fn().mockResolvedValue(true);
       const agendarPollMock = vi.fn();
@@ -581,8 +591,8 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       const mudarCompetencia = (v) => {
         if (!v) return;
         D.competencia = v + '-01';
-        SyncMock.versao = null;
-        _ultimaRemotaMock = 0;
+        // Não reseta versaoPorYm globalmente; cada competência mantém sua versão
+        // _ultimaRemotaPorYmMock também não é resetado
         if (SyncMock.ligado) {
           sincronizarMesMock(v).then((ok) => {
             if (ok) agendarPollMock(v);
@@ -593,8 +603,11 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       mudarCompetencia('2026-12');
 
       expect(D.competencia).toBe('2026-12-01');
-      expect(SyncMock.versao).toBeNull();
-      expect(_ultimaRemotaMock).toBe(0);
+      // Versão de 2026-11 permanece intacta
+      expect(SyncMock.versaoPorYm['2026-11']).toBe(42);
+      // Nova competência não tem versão ainda (null/undefined)
+      expect(SyncMock.versaoPorYm['2026-12']).toBeUndefined();
+      expect(_ultimaRemotaPorYmMock['2026-11']).toBe(1700000000);
       expect(sincronizarMesMock).toHaveBeenCalledWith('2026-12');
     });
   });
@@ -867,7 +880,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
 
   describe('Debounce _pullAtivoPorYm (2000ms)', () => {
     let _pullAtivoPorYm, _ultimoPullPorYm, PULL_DEBOUNCE_MS;
-    let fakeTransportCall, Sync, Sessao, D, Transport, _ultimaInteracao, _ultimaRemota;
+    let fakeTransportCall, Sync, Sessao, D, Transport, _ultimaInteracao, _ultimaRemotaPorYm;
     let atualizarDoServidor, sincronizarMes;
 
     beforeEach(() => {
@@ -876,9 +889,9 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       _ultimoPullPorYm = {};
       PULL_DEBOUNCE_MS = 2000;
       _ultimaInteracao = Date.now() - 5000;
-      _ultimaRemota = 0;
+      _ultimaRemotaPorYm = {};
       
-      Sync = { ligado: true, estado: 'ok', fila: [], versao: 1, enfileirar: vi.fn(), flush: vi.fn(), pintar: vi.fn(), agendar: vi.fn() };
+      Sync = { ligado: true, estado: 'ok', fila: [], versaoPorYm: {'2026-11': 1}, enfileirar: vi.fn(), flush: vi.fn(), pintar: vi.fn(), agendar: vi.fn() };
       Sessao = { token: 'token-123' };
       D = { competencia: '2026-11-01', movimentos: [] };
       
@@ -896,10 +909,11 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
           return Promise.resolve(false);
         }
         
+        var versaoAtual = Sync.versaoPorYm[ym] || null;
         var promessa = (async () => {
           try {
             var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
-            var r = await Transport.call('apiPull', [ym, Sessao.token, Sync.versao, ultimoMov]).catch(() => null);
+            var r = await Transport.call('apiPull', [ym, Sessao.token, versaoAtual, ultimoMov]).catch(() => null);
             return r;
           } finally {
             delete _pullAtivoPorYm[ym];
@@ -921,9 +935,10 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
           return Promise.resolve(false);
         }
         
+        var versaoAtual = Sync.versaoPorYm[ym] || null;
         var promessa = (async () => {
           try {
-            var desde = (Sync.versao != null && !Sync.fila.length) ? Sync.versao : null;
+            var desde = (versaoAtual != null && !Sync.fila.length) ? versaoAtual : null;
             var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
             var r = await Transport.call('apiPull', [ym, Sessao.token, desde, ultimoMov]).catch(() => null);
             return r;
@@ -960,7 +975,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
 
   describe('Debounce _pullAtivoPorYm - continuar', () => {
     let _pullAtivoPorYm, _ultimoPullPorYm, PULL_DEBOUNCE_MS;
-    let fakeTransportCall, Sync, Sessao, D, Transport, _ultimaInteracao, _ultimaRemota;
+    let fakeTransportCall, Sync, Sessao, D, Transport, _ultimaInteracao, _ultimaRemotaPorYm;
     let atualizarDoServidor, sincronizarMes;
 
     beforeEach(() => {
@@ -969,9 +984,9 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       _ultimoPullPorYm = {};
       PULL_DEBOUNCE_MS = 2000;
       _ultimaInteracao = Date.now() - 5000;
-      _ultimaRemota = 0;
+      _ultimaRemotaPorYm = {};
       
-      Sync = { ligado: true, estado: 'ok', fila: [], versao: 1, enfileirar: vi.fn(), flush: vi.fn(), pintar: vi.fn(), agendar: vi.fn() };
+      Sync = { ligado: true, estado: 'ok', fila: [], versaoPorYm: {'2026-11': 1}, enfileirar: vi.fn(), flush: vi.fn(), pintar: vi.fn(), agendar: vi.fn() };
       Sessao = { token: 'token-123' };
       D = { competencia: '2026-11-01', movimentos: [] };
       
@@ -989,10 +1004,11 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
           return Promise.resolve(false);
         }
         
+        var versaoAtual = Sync.versaoPorYm[ym] || null;
         var promessa = (async () => {
           try {
             var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
-            var r = await Transport.call('apiPull', [ym, Sessao.token, Sync.versao, ultimoMov]).catch(() => null);
+            var r = await Transport.call('apiPull', [ym, Sessao.token, versaoAtual, ultimoMov]).catch(() => null);
             return r;
           } finally {
             delete _pullAtivoPorYm[ym];
@@ -1014,9 +1030,10 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
           return Promise.resolve(false);
         }
         
+        var versaoAtual = Sync.versaoPorYm[ym] || null;
         var promessa = (async () => {
           try {
-            var desde = (Sync.versao != null && !Sync.fila.length) ? Sync.versao : null;
+            var desde = (versaoAtual != null && !Sync.fila.length) ? versaoAtual : null;
             var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
             var r = await Transport.call('apiPull', [ym, Sessao.token, desde, ultimoMov]).catch(() => null);
             return r;
@@ -1071,7 +1088,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
         ligado: true, 
         estado: 'ok', 
         fila: [{ ym: '2026-11', ops: [{ t: 'marca', k: '1|2026-11-01', v: 'X' }] }],
-        versao: 1,
+        versaoPorYm: {'2026-11': 1},
         enfileirar: vi.fn(),
         flush: vi.fn(() => { flushCalls++; return Promise.resolve(); }),
         pintar: vi.fn(),

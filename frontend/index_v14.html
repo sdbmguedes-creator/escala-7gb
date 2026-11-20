@@ -1344,7 +1344,7 @@ const Sync = {
   fila: [],
   timer: null,
   estado: "offline",     // offline | ok | enviando
-  versao: null,
+  versaoPorYm: {},       // versao por competência (ym)
   recusadas: null,
 
   iniciar: function(){
@@ -1438,10 +1438,11 @@ const Sync = {
           console.warn("[sync] recusadas:", r.recusadas);
           mostrarRecusas();
         }
-        Sync.versao = r.versao;
+        // Push pode conter ops de várias competências; a versão retornada é ambígua.
+        // Não armazenamos globalmente; cada competência atualiza sua versão no próximo pull.
       }
       Sync.estado = "ok";
-      console.log("[sync] push ok — versao", Sync.versao);
+      console.log("[sync] push ok — versao", r.versao);
     }catch(e){
       Sync.fila = lote.concat(Sync.fila);   // devolve tudo
       Sync.estado = "offline";
@@ -5544,20 +5545,16 @@ function mudarCompetencia(v){
     desenhar();
     status("competência: " + mesAnoBR(v));
 
-    // Ao trocar de competência, reseta os cursores para que a versão de outro mês
-    // não bloqueie ou contamine a nova competência.
-    if (typeof Sync !== "undefined") {
-      Sync.versao = null;
-      _ultimaRemota = 0;
-      if (Sync.ligado && typeof sincronizarMes === "function") {
-        sincronizarMes(v).then(function(ok){
-          if (ok) {
-            carregarEstado();
-            desenhar();
-          }
-          if (typeof agendarPoll === "function") agendarPoll(v);
-        });
-      }
+    // Versões são por competência (Sync.versaoPorYm[ym]), então não há contaminação
+    // entre meses. Apenas garante que o polling seja agendado para a nova competência.
+    if (typeof Sync !== "undefined" && Sync.ligado && typeof sincronizarMes === "function") {
+      sincronizarMes(v).then(function(ok){
+        if (ok) {
+          carregarEstado();
+          desenhar();
+        }
+        if (typeof agendarPoll === "function") agendarPoll(v);
+      });
     }
   }
 
@@ -5870,7 +5867,7 @@ function aplicarRemoto(remoto, ym){
 /* ===== consulta periódica: mudanças feitas por outros usuários =====
    5 s com atividade recente · 30 s ocioso · nada com a aba oculta.
    Cada consulta é uma execução no Apps Script: 5 s fixo estouraria a cota. */
-var _ultimaInteracao = 0, _ultimaRemota = 0, _pollTimer = null, _pollTick = 0;
+var _ultimaInteracao = 0, _ultimaRemotaPorYm = {}, _pollTimer = null, _pollTick = 0;
 // Polling otimizado: 30s ativo, 5min ocioso, janela 10min. Evita egress excessivo.
 var PULL_ATIVO_MS = 15000, PULL_OCIOSO_TICKS = 12, JANELA_ATIVO_MS = 300000;
 function _marcarInteracao(){ _ultimaInteracao = Date.now(); }
@@ -5902,26 +5899,29 @@ async function atualizarDoServidor(ym){
     return Promise.resolve(false);
   }
 
+  var versaoAtual = Sync.versaoPorYm[ym] || null;
+  var ultimaRemota = _ultimaRemotaPorYm[ym] || 0;
+
   var promessa = (async function(){
     try {
       var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
-      var r = await Transport.call("apiPull", [ym, Sessao.token, Sync.versao, ultimoMov]).catch(function(){ return null; });
+      var r = await Transport.call("apiPull", [ym, Sessao.token, versaoAtual, ultimoMov]).catch(function(){ return null; });
       if (!r || !r.ok) return;
       if (r.semMudanca){
-        if (r.versao != null && (Sync.versao == null || r.versao > Sync.versao)) Sync.versao = r.versao;
+        if (r.versao != null && (versaoAtual == null || r.versao > versaoAtual)) Sync.versaoPorYm[ym] = r.versao;
         return;
       }
       if (Sync.estado === "enviando" || Sync.fila.length) return;
       if (!r.marcas) return;
-      // FIX RACE: comparar com Sync.versao ATUAL, não com cópia capturada antes
+      // FIX RACE: comparar com versaoAtual ATUAL, não com cópia capturada antes
       // do await. Se um push local rodou durante o pull, aplicar esse payload
       // regride o estado → tela pisca, marcas "voltam". Regra: só aceita
       // payload ESTRITAMENTE mais novo. Respostas atrasadas são descartadas.
-      if (Sync.versao !== null && r.versao < Sync.versao) return;
-      if (_ultimaRemota > 0 && r.versao === Sync.versao) return;
+      if (versaoAtual !== null && r.versao < versaoAtual) return;
+      if (ultimaRemota > 0 && r.versao === versaoAtual) return;
       aplicarRemoto(estadoDoServidor(r), ym);
-      Sync.versao = r.versao;
-      _ultimaRemota = Date.now();
+      Sync.versaoPorYm[ym] = r.versao;
+      _ultimaRemotaPorYm[ym] = Date.now();
       
       // Se o usuário estiver vendo a Auditoria, NÃO redesenha a escala por baixo
       var btnAud = document.getElementById('btnAuditoria');
@@ -5950,7 +5950,8 @@ function agendarPoll(ym){
     if (Sync.estado === "enviando") return;
     // Evita pull concorrente enquanto o usuário acabou de mexer (debounce de push é 1500ms)
     if (_ultimaInteracao && (Date.now() - _ultimaInteracao) < 2000) return;
-    var recente = (Date.now() - Math.max(_ultimaInteracao, _ultimaRemota)) < JANELA_ATIVO_MS;
+    var ultimaRemotaYm = _ultimaRemotaPorYm[ym] || 0;
+    var recente = (Date.now() - Math.max(_ultimaInteracao, ultimaRemotaYm)) < JANELA_ATIVO_MS;
     if (!recente && (_pollTick % PULL_OCIOSO_TICKS) !== 0) return;
     atualizarDoServidor(ym);
   }, PULL_ATIVO_MS);
@@ -5969,7 +5970,8 @@ async function sincronizarMes(ym){
 
   var promessa = (async function(){
     try {
-      var desde = (Sync.versao != null && !Sync.fila.length) ? Sync.versao : null;
+      var versaoAtual = Sync.versaoPorYm[ym] || null;
+      var desde = (versaoAtual != null && !Sync.fila.length) ? versaoAtual : null;
       var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
       var r = await Transport.call("apiPull", [ym, Sessao.token, desde, ultimoMov]).catch(function(){ return null; });
       if (!r || !r.ok){
@@ -5978,17 +5980,17 @@ async function sincronizarMes(ym){
       }
 
       if (r.semMudanca){
-        if (r.versao != null && (Sync.versao == null || r.versao > Sync.versao)) Sync.versao = r.versao;
-        window.__sync = { ok: true, versao: Sync.versao, semMudanca: true, quando: new Date().toISOString() };
+        if (r.versao != null && (versaoAtual == null || r.versao > versaoAtual)) Sync.versaoPorYm[ym] = r.versao;
+        window.__sync = { ok: true, versao: Sync.versaoPorYm[ym], semMudanca: true, quando: new Date().toISOString() };
         return true;
       }
 
-      if (Sync.versao !== null && r.versao < Sync.versao){
-        console.warn("[sync] ignorando pull atrasado — versao", r.versao, "< atual", Sync.versao);
+      if (versaoAtual !== null && r.versao < versaoAtual){
+        console.warn("[sync] ignorando pull atrasado — versao", r.versao, "< atual", versaoAtual);
         return true;
       }
 
-      Sync.versao = r.versao;
+      Sync.versaoPorYm[ym] = r.versao;
       aplicarRemoto(estadoDoServidor(r), ym);
 
       // Servidor sem cadastro: envia o elenco uma vez. Sem ele a ACO por SB é
