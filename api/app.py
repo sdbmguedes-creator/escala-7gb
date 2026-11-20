@@ -109,34 +109,45 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_estatico(self, arquivo):
         # Define o tipo correto para cada arquivo
         if arquivo.endswith(".json"):
-            content_type = "application/json"
+            content_type = "application/json; charset=utf-8"
         elif arquivo.endswith(".js"):
-            content_type = "application/javascript"
+            content_type = "application/javascript; charset=utf-8"
         elif arquivo.endswith(".png"):
             content_type = "image/png"
+        elif arquivo.endswith(".svg"):
+            content_type = "image/svg+xml"
         else:
             content_type = "application/octet-stream"
 
-        file_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            arquivo,
-        )
-        
-        try:
-            with open(file_path, "rb") as f:
-                corpo = f.read()
-        except FileNotFoundError:
+        raiz_projeto = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        nome_limpo = os.path.basename(arquivo)
+
+        candidatos = [
+            os.path.join(raiz_projeto, "frontend", nome_limpo),
+            os.path.join(raiz_projeto, nome_limpo),
+        ]
+
+        corpo = None
+        for caminho in candidatos:
+            if os.path.isfile(caminho):
+                with open(caminho, "rb") as f:
+                    corpo = f.read()
+                break
+
+        if corpo is None:
             self.send_response(404)
             self.end_headers()
             return
-            
+
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-cache")
+        if nome_limpo == "sw.js":
+            self.send_header("Service-Worker-Allowed", "/")
         self.send_header("Content-Length", str(len(corpo)))
         self.end_headers()
         self.wfile.write(corpo)
-
     # ---------- index ----------
     def _serve_index(self):
         html_path = os.path.join(
@@ -144,19 +155,30 @@ class Handler(BaseHTTPRequestHandler):
         "frontend",
         "index_v14.html",
     )
-        try:
-            with open(html_path, "r", encoding="utf-8") as f:
-                conteudo = f.read()
-        except FileNotFoundError:
-            json_response(self, {"ok": False, "erro": "index_v14.html nao encontrado"}, 404)
+
+    def _serve_sw(self):
+        sw_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frontend",
+            "sw.js",
+        )
+        if not os.path.isfile(sw_path):
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"sw.js not found")
             return
-        corpo = conteudo.encode("utf-8")
+
+        with open(sw_path, "rb") as f:
+            conteudo = f.read()
+
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Content-Length", str(len(corpo)))
+        self.send_header("Content-Type", "application/javascript; charset=utf-8")
+        self.send_header("Content-Length", str(len(conteudo)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Service-Worker-Allowed", "/")
         self.end_headers()
-        self.wfile.write(corpo)
+        self.wfile.write(conteudo)
 
     # ---------- dispatch POST ----------
     def do_POST(self):
