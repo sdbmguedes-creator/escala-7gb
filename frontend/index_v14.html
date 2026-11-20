@@ -5715,6 +5715,27 @@ function estadoDoServidor(p){
   };
 }
 
+function reaplicarFilaPendenteLocal(ym){
+  try{
+    if (!Sync || !Array.isArray(Sync.fila) || !Sync.fila.length) return;
+    Sync.fila.forEach(function(item){
+      if (!item || item.ym !== ym || !Array.isArray(item.ops)) return;
+      item.ops.forEach(function(op){
+        if (op && op.t === "marca" && op.k){
+          if (op.v === "" || op.v == null){
+            delete marks[op.k];
+          } else {
+            marks[op.k] = op.v;
+          }
+        }
+      });
+    });
+  }catch(e){
+    console.warn("[sync] reaplicar fila pendente:", e);
+  }
+}
+
+
 /* Aplica um estado vindo do servidor e persiste.
    Usado no pull inicial e na consulta periódica. */
 function aplicarRemoto(remoto, ym){
@@ -5753,6 +5774,7 @@ function aplicarRemoto(remoto, ym){
     if (local && local.mes) D.mes = local.mes;
   }
 
+  reaplicarFilaPendenteLocal(ym);
   autoX = true;
   reconstruirIndiceMarcas();
   try{ _ultimoSync[ym] = JSON.parse(JSON.stringify(estadoSalvavel())); }catch(e){}
@@ -5786,7 +5808,13 @@ async function atualizarDoServidor(ym){
 
 // ─────────── DEPOIS ───────────
   var r = await Transport.call("apiPull", [ym, Sessao.token, Sync.versao]).catch(function(){ return null; });
-  if (!r || !r.ok || r.semMudanca || !r.marcas) return;
+  if (!r || !r.ok) return;
+  if (r.semMudanca){
+    if (r.versao != null && (Sync.versao == null || r.versao > Sync.versao)) Sync.versao = r.versao;
+    return;
+  }
+  if (Sync.estado === "enviando" || Sync.fila.length) return;
+  if (!r.marcas) return;
   // FIX RACE: comparar com Sync.versao ATUAL, não com cópia capturada antes
   // do await. Se um push local rodou durante o pull, aplicar esse payload
   // regride o estado → tela pisca, marcas "voltam". Regra: só aceita
@@ -5813,6 +5841,9 @@ function agendarPoll(ym){
   if (!Sync.ligado) return;
   _pollTimer = setInterval(function(){
     _pollTick++;
+    if (Sync.estado === "enviando") return;
+    // Evita pull concorrente enquanto o usuário acabou de mexer (debounce de push é 1500ms)
+    if (_ultimaInteracao && (Date.now() - _ultimaInteracao) < 2000) return;
     var recente = (Date.now() - Math.max(_ultimaInteracao, _ultimaRemota)) < JANELA_ATIVO_MS;
     if (!recente && (_pollTick % PULL_OCIOSO_TICKS) !== 0) return;
     atualizarDoServidor(ym);
@@ -5821,11 +5852,19 @@ function agendarPoll(ym){
 
 async function sincronizarMes(ym){
   if (!Transport.disponivel() || !Sessao.token) return false;
+  if (Sync.estado === "enviando") return false;
 
-  var r = await Transport.call("apiPull", [ym, Sessao.token, null]).catch(function(){ return null; });
+  var desde = (Sync.versao != null && !Sync.fila.length) ? Sync.versao : null;
+  var r = await Transport.call("apiPull", [ym, Sessao.token, desde]).catch(function(){ return null; });
   if (!r || !r.ok){
     window.__sync = { ok: false, motivo: (r && (r.erro || "sem resposta")) || "offline" };
     return false;
+  }
+
+  if (r.semMudanca){
+    if (r.versao != null) Sync.versao = r.versao;
+    window.__sync = { ok: true, versao: Sync.versao, semMudanca: true, quando: new Date().toISOString() };
+    return true;
   }
 
   Sync.versao = r.versao;

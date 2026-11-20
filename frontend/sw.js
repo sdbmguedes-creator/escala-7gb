@@ -43,7 +43,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   if (e.request.url.includes('/api/')) return;
 
-  e.respondWith(
+e.respondWith(
     caches.match(e.request).then((cachedResponse) => {
       const fetchPromise = fetch(e.request)
         .then((networkResponse) => {
@@ -53,9 +53,9 @@ self.addEventListener('fetch', (e) => {
               cache.put(e.request, clone);
             });
           }
-          return networkResponse;
+          return networkResponse || cachedResponse || new Response('', { status: 504 });
         })
-        .catch(() => cachedResponse);
+        .catch(() => cachedResponse || new Response('', { status: 504 }));
 
       return cachedResponse || fetchPromise;
     })
