@@ -804,6 +804,20 @@ class Handler(BaseHTTPRequestHandler):
                                 for k_db, v_db in elenco_map[mid].items():
                                     if k_db in base:
                                         base[k_db] = v_db
+                            def _to_bool(val, default=False):
+                                if isinstance(val, bool):
+                                    return val
+                                if val is None or val == "":
+                                    return default
+                                if isinstance(val, (int, float)):
+                                    return bool(val)
+                                s = str(val).strip().lower()
+                                if s in ("true", "1", "sim", "s", "yes", "y"):
+                                    return True
+                                if s in ("false", "0", "nao", "não", "n", "no"):
+                                    return False
+                                return default
+
                             for k_op, v_op in campos.items():
                                 alvo = MAPA_CAMPOS_FRONT.get(k_op)
                                 if alvo:
@@ -812,8 +826,15 @@ class Handler(BaseHTTPRequestHandler):
                                             base[alvo] = int(v_op) if v_op not in (None, "") else 0
                                         except (ValueError, TypeError):
                                             base[alvo] = 0
+                                    elif alvo in ("restricao", "adm"):
+                                        base[alvo] = _to_bool(v_op, default=False)
                                     else:
                                         base[alvo] = v_op if v_op is not None else ([] if alvo == "afast_json" else "")
+
+                            if "restricao" in base:
+                                base["restricao"] = _to_bool(base.get("restricao"), default=False)
+                            if "adm" in base:
+                                base["adm"] = _to_bool(base.get("adm"), default=False)
 
                             try:
                                 base["cotas_adm"] = int(base.get("cotas_adm") or 0)
