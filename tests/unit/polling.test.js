@@ -14,7 +14,6 @@ const localStorageMock = (() => {
 Object.defineProperty(global, 'localStorage', { value: localStorageMock });
 
 // Mock do Date.now para controle de tempo
-const originalDateNow = Date.now;
 
 describe('Polling e Sincronização - Testes Preventivos', () => {
   beforeEach(() => {
@@ -82,9 +81,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
   describe('agendarPoll', () => {
     it('deve criar timer com intervalo PULL_ATIVO_MS', () => {
       // We test the logic by simulating the setInterval call
-      let intervalId = null;
-      global.setInterval = vi.fn((fn, ms) => {
-        intervalId = ms;
+      global.setInterval = vi.fn(() => {
         return 123;
       });
       global.clearInterval = vi.fn();

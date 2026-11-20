@@ -1,5 +1,5 @@
-const CACHE_NAME = 'escala7gb-v2-' + new Date().toISOString().split('T')[0];
-const ASSETS = [
+/* global Response */
+const CACHE_NAME = 'escala7gb-v2-' + new Date().toISOString().split('T')[0];const ASSETS = [
   './',
   './index_v14.html',
   './manifest.json'
