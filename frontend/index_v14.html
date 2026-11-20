@@ -1389,7 +1389,7 @@ const Sync = {
     Sync.timer = setTimeout(function(){ Sync.flush(); }, 1500);
   },
 
-  flush: async function(){
+  flush: async function(forcar){
     if (!Sync.pullInicialConcluido && !forcar) return;
     if (!Sync.ligado || !Sync.fila.length) return;
     if (Sync.estado === "enviando") return;

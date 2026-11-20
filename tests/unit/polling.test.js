@@ -413,6 +413,32 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
 
       // Não deve prosseguir
     });
+
+    it('não deve lançar ReferenceError quando flush for chamado sem argumento forcar e sem pullInicialConcluido', async () => {
+      const SyncObj = {
+        pullInicialConcluido: false,
+        ligado: true,
+        fila: [{ ym: '2026-11', ops: [{ t: 'marca' }] }],
+        estado: 'ok',
+        flush: async function(forcar) {
+          if (!this.pullInicialConcluido && !forcar) return false;
+          return true;
+        }
+      };
+
+      // Chamada sem argumentos — não deve lançar "ReferenceError: forcar is not defined"
+      let executouSemForcar = false;
+      await expect(
+        (async () => {
+          executouSemForcar = await SyncObj.flush();
+        })()
+      ).resolves.not.toThrow();
+      expect(executouSemForcar).toBe(false);
+
+      // Chamada com forcar = true
+      const executouComForcar = await SyncObj.flush(true);
+      expect(executouComForcar).toBe(true);
+    });
   });
 
   describe('Sync.agendar - Debounce de 1.5s', () => {
