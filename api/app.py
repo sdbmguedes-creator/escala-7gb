@@ -796,7 +796,18 @@ class Handler(BaseHTTPRequestHandler):
                             for k_op, v_op in campos.items():
                                 alvo = MAPA_CAMPOS_FRONT.get(k_op)
                                 if alvo:
-                                    base[alvo] = v_op if v_op is not None else ([] if alvo == "afast_json" else "")
+                                    if alvo == "cotas_adm":
+                                        try:
+                                            base[alvo] = int(v_op) if v_op not in (None, "") else 0
+                                        except (ValueError, TypeError):
+                                            base[alvo] = 0
+                                    else:
+                                        base[alvo] = v_op if v_op is not None else ([] if alvo == "afast_json" else "")
+
+                            try:
+                                base["cotas_adm"] = int(base.get("cotas_adm") or 0)
+                            except (ValueError, TypeError):
+                                base["cotas_adm"] = 0
 
                             secao_alvo = base.get("secao") or ""
                             if perfil not in ("Admin", "Mestre") and str(secao_alvo) != str(perfil):
