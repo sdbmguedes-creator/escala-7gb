@@ -655,8 +655,17 @@ class Handler(BaseHTTPRequestHandler):
                 elif op["t"] == "marca":
                     k = op.get("k", "")
                     p = str(k).split("|")
+                    dia_int = None
+                    if len(p) >= 3:
+                        try:
+                            dia_int = int(p[2])
+                        except (ValueError, TypeError):
+                            dia_int = None
+
                     if len(p) < 3:
                         motivo = "chave de marca inválida"
+                    elif dia_int is None:
+                        motivo = f"dia inválido na chave de marca: {k}"
                     elif not pode_gravar(perfil, p[0], p[1], elenco_map):
                         motivo = f"perfil {perfil} não pode gravar em {p[0]}"
                     else:
@@ -665,7 +674,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "competencia": competencia,
                                 "grupo":       p[0],
                                 "militar_id":  p[1],
-                                "dia":         p[2],
+                                "dia":         dia_int,
                                 "codigo":      op["v"],
                                 "ts":          agora,
                                 "autor":       u["nome"],
@@ -802,13 +811,17 @@ class Handler(BaseHTTPRequestHandler):
                         motivo = "mov exige Admin ou Mestre"
                     else:
                         d = op.get("dados") or {}
+                        try:
+                            qtd_int = int(d.get("qtd") or 0)
+                        except (ValueError, TypeError):
+                            qtd_int = 0
                         sb_request("POST", "movimentos", body={
                             "competencia": competencia,
                             "quando": d.get("quando", ""),
                             "tipo": d.get("tipo", ""),
                             "origem": d.get("origem", ""),
                             "destino": d.get("destino", ""),
-                            "qtd": d.get("qtd", 0),
+                            "qtd": qtd_int,
                             "motivo": d.get("motivo", ""),
                             "autor": u["nome"],
                         })
@@ -946,8 +959,10 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "versao": versao_final, "aplicadas": aplicadas, "recusadas": recusadas})
 
         except Exception as e:
-            print(f"[push] erro: {e}")
-            json_response(self, {"ok": False, "erro": str(e)}, 500)
+            msg = str(e)
+            print(f"[push] erro: {msg}")
+            status_code = 400 if "Supabase 400:" in msg else 500
+            json_response(self, {"ok": False, "erro": msg}, status_code)
 
     def _redefinir_pin(self):
         corpo = read_body(self)
