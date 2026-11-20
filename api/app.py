@@ -621,6 +621,23 @@ class Handler(BaseHTTPRequestHandler):
             "aco":         extras.get("aco", []),
         }
 
+        payload_pull = {
+            "ok":            True,
+            "versao":        versao,
+            "marcas":        marcas_out,
+            "comments":      comentarios_out,
+            "elenco":        elenco_out,
+            "acoOficiais":   aco_oficiais,
+            "movimentos":    movimentos,
+            "meta":          meta,
+        }
+        try:
+            tamanhos = {k: len(json.dumps(v, ensure_ascii=False).encode("utf-8")) for k, v in payload_pull.items() if k != "ok"}
+            print(f"[pull_diag] comp={competencia} tamanhos_bytes={tamanhos}")
+        except Exception:
+            pass
+        json_response(self, payload_pull)
+
         json_response(
             self,
             {

@@ -1390,6 +1390,7 @@ const Sync = {
   },
 
   flush: async function(){
+    if (!Sync.pullInicialConcluido && !forcar) return;
     if (!Sync.ligado || !Sync.fila.length) return;
     if (Sync.estado === "enviando") return;
     if (Sync.estado === "erro-fatal") return;   // só destrava via descartarFila()/manual
@@ -6029,16 +6030,18 @@ function iniciarApp(){
   // diff virava centenas de exclusões.
   function entrarComSync(){
     entrar();
-    var syncPromise = sincronizarMes(ym);
-    var timeoutPromise = new Promise(function(resolve){ setTimeout(function(){ resolve(false); }, 8000); });
-    Promise.race([syncPromise, timeoutPromise]).then(function(ok){
+    Sync.pullInicialConcluido = false;
+    sincronizarMes(ym).then(function(ok){
+      Sync.pullInicialConcluido = true;
       if (ok){
         carregarEstado();
         desenhar();
       }
       if (Sync.ligado && Sync.fila.length){
-        Sync.flush().finally(function(){
+        Sync.flush().then(function(){
           if (Sync.ligado && !Sync.fila.length){ Sync.estado = "ok"; Sync.pintar(); }
+          agendarPoll(ym);
+        }, function(){
           agendarPoll(ym);
         });
       } else {
@@ -6046,6 +6049,7 @@ function iniciarApp(){
         agendarPoll(ym);
       }
     }, function(){
+      Sync.pullInicialConcluido = true;
       agendarPoll(ym);
     });
   }
