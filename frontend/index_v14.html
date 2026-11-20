@@ -1355,7 +1355,6 @@ const Sync = {
     if (Sync.ligado && !Sync.fila.length) Sync.estado = "ok";
     Sync.pintar();
     if (Sync.ligado){
-      if (Sync.fila.length) Sync.flush();          // sobe o que ficou pendente de outra sessão
       window.addEventListener("online", function(){ Sync.flush(); });
       // Flush periódico: apenas a cada 5 minutos (reduzido de 60s)
       setInterval(function(){ if (Sync.fila.length) Sync.flush(); }, 300000);
@@ -6030,13 +6029,25 @@ function iniciarApp(){
   // diff virava centenas de exclusões.
   function entrarComSync(){
     entrar();
-    sincronizarMes(ym).then(function(ok){
-      if (!ok) return;
-      carregarEstado();
-      desenhar();
-      if (Sync.ligado && !Sync.fila.length){ Sync.estado = "ok"; Sync.pintar(); }
+    var syncPromise = sincronizarMes(ym);
+    var timeoutPromise = new Promise(function(resolve){ setTimeout(function(){ resolve(false); }, 8000); });
+    Promise.race([syncPromise, timeoutPromise]).then(function(ok){
+      if (ok){
+        carregarEstado();
+        desenhar();
+      }
+      if (Sync.ligado && Sync.fila.length){
+        Sync.flush().finally(function(){
+          if (Sync.ligado && !Sync.fila.length){ Sync.estado = "ok"; Sync.pintar(); }
+          agendarPoll(ym);
+        });
+      } else {
+        if (Sync.ligado && !Sync.fila.length){ Sync.estado = "ok"; Sync.pintar(); }
+        agendarPoll(ym);
+      }
+    }, function(){
       agendarPoll(ym);
-    }, function(){});
+    });
   }
 
   if (!Sessao.carregar()){ pedirPin().then(entrarComSync); return; }
