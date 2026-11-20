@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import os
 import json
 import urllib.request
@@ -87,22 +88,47 @@ def sb_select(path, filters=None, order=None, limit=None):
         base_params["limit"] = str(limit)
         return sb_request("GET", path, params=base_params)
 
-    # Sem limite OU limite grande — pagina
+    # Sem limite OU limite grande — busca primeira página e paraleliza as seguintes
     page_size = 1000
-    offset = 0
-    todas = []
-    while True:
+
+    def _fetch_offset(off):
         params = dict(base_params)
         params["limit"] = str(page_size)
-        params["offset"] = str(offset)
-        lote = sb_request("GET", path, params=params) or []
-        todas.extend(lote)
-        if len(lote) < page_size:
-            break
-        offset += page_size
+        params["offset"] = str(off)
+        return sb_request("GET", path, params=params) or []
+
+    lote_inicial = _fetch_offset(0)
+    if len(lote_inicial) < page_size:
+        return lote_inicial[:limit] if limit is not None else lote_inicial
+
+    todas = list(lote_inicial)
+    offset = page_size
+    max_workers = 4
+
+    while True:
         if limit is not None and len(todas) >= limit:
-            todas = todas[:limit]
             break
+
+        offsets_lote = [offset + i * page_size for i in range(max_workers)]
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            resultados = list(pool.map(_fetch_offset, offsets_lote))
+
+        parou = False
+        for lote in resultados:
+            todas.extend(lote)
+            if len(lote) < page_size:
+                parou = True
+                break
+            if limit is not None and len(todas) >= limit:
+                parou = True
+                break
+
+        if parou:
+            break
+        offset += max_workers * page_size
+
+    if limit is not None and len(todas) > limit:
+        todas = todas[:limit]
     return todas
 
 
