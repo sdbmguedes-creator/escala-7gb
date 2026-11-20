@@ -40,8 +40,7 @@ self.addEventListener('activate', (e) => {
 
 // 3. Intercepta as requisições com Stale-While-Revalidate
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
-  if (e.request.url.includes('/api/')) return;
+  if (e.request.method !== 'GET' || e.request.url.includes('/api/')) return;
 
 e.respondWith(
     caches.match(e.request).then((cachedResponse) => {

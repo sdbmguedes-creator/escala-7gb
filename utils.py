@@ -16,16 +16,20 @@ def json_response(handler, dados, status=200):
         corpo = gzip.compress(corpo, compresslevel=6)
         usou_gzip = True
 
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
-    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    if usou_gzip:
-        handler.send_header("Content-Encoding", "gzip")
-    handler.send_header("Content-Length", str(len(corpo)))
-    handler.end_headers()
-    handler.wfile.write(corpo)
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+        handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        if usou_gzip:
+            handler.send_header("Content-Encoding", "gzip")
+        handler.send_header("Content-Length", str(len(corpo)))
+        handler.end_headers()
+        handler.wfile.write(corpo)
+    except (BrokenPipeError, ConnectionResetError):
+        # Cliente fechou a conexão antes de receber a resposta (abort/timeout/refresh)
+        pass
 
 
 def read_body(handler):

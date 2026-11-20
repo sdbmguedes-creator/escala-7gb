@@ -546,6 +546,13 @@ class Handler(BaseHTTPRequestHandler):
         if desde_versao is None:
             desde_versao = corpo.get("versao")
 
+        desde_quando = corpo.get("desdeQuando") or corpo.get("desde_quando")
+        try:
+            limite_mov = int(corpo.get("limiteMovimentos") or corpo.get("limite_movimentos") or 200)
+        except (ValueError, TypeError):
+            limite_mov = 200
+        limite_mov = max(1, min(1000, limite_mov))
+
         u = resolver_token(token)
         if not u:
             json_response(self, {"ok": False, "erro": "token inválido"}, 401)
@@ -560,12 +567,19 @@ class Handler(BaseHTTPRequestHandler):
 
         extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
 
+        filtros_mov = {"competencia": competencia}
+        if desde_quando:
+            filtros_mov["quando"] = f"gt.{desde_quando}"
+            ordem_mov = "quando.asc"
+        else:
+            ordem_mov = "quando.desc"
+
         with ThreadPoolExecutor(max_workers=5) as pool:
             fut_marcas = pool.submit(lambda: sb_select("marcas", {"competencia": competencia}) or [])
             fut_comments = pool.submit(lambda: sb_select("comments", {"competencia": competencia}) or [])
             fut_elenco = pool.submit(lambda: sb_select("elenco", {"competencia": competencia}) or [])
             fut_aco = pool.submit(lambda: sb_select("aco_oficiais", {"competencia": competencia}) or [])
-            fut_mov = pool.submit(lambda: sb_select("movimentos", {"competencia": competencia}) or [])
+            fut_mov = pool.submit(lambda: sb_select("movimentos", filtros_mov, order=ordem_mov, limit=limite_mov) or [])
 
             marcas = fut_marcas.result()
             comentarios = fut_comments.result()
@@ -637,20 +651,6 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
         json_response(self, payload_pull)
-
-        json_response(
-            self,
-            {
-                "ok":            True,
-                "versao":        versao,
-                "marcas":        marcas_out,
-                "comments":      comentarios_out,
-                "elenco":        elenco_out,
-                "acoOficiais":   aco_oficiais,
-                "movimentos":    movimentos,
-                "meta":          meta,
-            },
-        )
 
     def _push(self):
         try:

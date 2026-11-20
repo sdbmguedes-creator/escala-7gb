@@ -5578,7 +5578,7 @@ var ROTAS_API = {
   apiLogin:            { path: "/api/login",            args: ["pin"] },
   apiLogout:           { path: "/api/logout",           args: ["token"] },
   apiBootstrap:        { path: "/api/bootstrap",        args: ["competencia", "token"] },
-  apiPull:             { path: "/api/pull",             args: ["competencia", "token", "desdeVersao"] },
+  apiPull:             { path: "/api/pull",             args: ["competencia", "token", "desdeVersao", "desdeQuando", "limiteMovimentos"] },
   apiPush:             { path: "/api/push",             args: ["competencia", "ops", "token"] },
   apiCriarUsuario:     { path: "/api/criar_usuario",    args: ["token", "nome", "perfil", "pin"] },
   apiListarUsuarios:   { path: "/api/listar_usuarios",  args: ["token"] },
@@ -5603,18 +5603,25 @@ var Transport = {
       var body = {};
       var a = args || [];
       rota.args.forEach(function(k, i){ body[k] = (i < a.length ? a[i] : null); });
+      var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+      var timer = controller ? setTimeout(function(){ controller.abort(); }, 25000) : null;
       fetch(rota.path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: controller ? controller.signal : undefined
       }).then(function(r){
+        if (timer) clearTimeout(timer);
         return r.text().then(function(txt){
           var j = {};
           try { j = JSON.parse(txt); } catch(e){ j = {}; }
           if (!r.ok && !j.erro) j.erro = "HTTP " + r.status;
           resolve(j);
         });
-      }).catch(function(e){ reject(e); });
+      }).catch(function(e){
+        if (timer) clearTimeout(timer);
+        reject(e);
+      });
     });
   }
 };
@@ -5745,7 +5752,15 @@ function aplicarRemoto(remoto, ym){
   marks = remoto.marks;
   if (Object.keys(remoto.comments).length) comments = remoto.comments;
   if (Object.keys(remoto.acoOficiais).length) D.acoOficiais = remoto.acoOficiais;
-  if (remoto.movimentos.length) D.movimentos = remoto.movimentos;
+  if (remoto.movimentos && remoto.movimentos.length) {
+    var idMov = function(m){ return [m.quando, m.tipo, m.origem, m.destino, m.qtd].join("|"); };
+    var mapa = {};
+    (D.movimentos || []).forEach(function(m){ mapa[idMov(m)] = m; });
+    remoto.movimentos.forEach(function(m){ mapa[idMov(m)] = m; });
+    D.movimentos = Object.values(mapa).sort(function(a, b){
+      return String(a.quando || "").localeCompare(String(b.quando || ""));
+    });
+  }
   if (remoto.vis && Object.keys(remoto.vis).length) vis = remoto.vis;
   if (remoto.visLinhas && Object.keys(remoto.visLinhas).length) D.visLinhas = remoto.visLinhas;
   if (remoto.aco && remoto.aco.length) aco = remoto.aco;
@@ -5800,39 +5815,52 @@ document.addEventListener("visibilitychange", function() {
 });
 
 
+var _pullAtivoPorYm = {};
+
 async function atualizarDoServidor(ym){
   if (!Sync.ligado || document.hidden) return;
   if (Sync.estado === "enviando") return;
   if (Sync.fila.length) return;
   if (Date.now() - _ultimaInteracao < 1000) return; // Reduzido de 3s para 1s
 
-// ─────────── DEPOIS ───────────
-  var r = await Transport.call("apiPull", [ym, Sessao.token, Sync.versao]).catch(function(){ return null; });
-  if (!r || !r.ok) return;
-  if (r.semMudanca){
-    if (r.versao != null && (Sync.versao == null || r.versao > Sync.versao)) Sync.versao = r.versao;
-    return;
-  }
-  if (Sync.estado === "enviando" || Sync.fila.length) return;
-  if (!r.marcas) return;
-  // FIX RACE: comparar com Sync.versao ATUAL, não com cópia capturada antes
-  // do await. Se um push local rodou durante o pull, aplicar esse payload
-  // regride o estado → tela pisca, marcas "voltam". Regra: só aceita
-  // payload ESTRITAMENTE mais novo. Respostas atrasadas são descartadas.
-  if (Sync.versao !== null && r.versao < Sync.versao) return;
-  if (_ultimaRemota > 0 && r.versao === Sync.versao) return;
-    aplicarRemoto(estadoDoServidor(r), ym);
-  Sync.versao = r.versao;
-  _ultimaRemota = Date.now();
-  
-  // Se o usuário estiver vendo a Auditoria, NÃO redesenha a escala por baixo
-  var btnAud = document.getElementById('btnAuditoria');
-  if (!btnAud || !btnAud.classList.contains('active')) {
-    desenhar();
-  }
-  
-  try{ status("atualizado — outro usuário gravou"); }catch(e){}
-  console.log("[sync] atualizado por outro usuário · versao", r.versao);
+  if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+
+  var promessa = (async function(){
+    try {
+      var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
+      var r = await Transport.call("apiPull", [ym, Sessao.token, Sync.versao, ultimoMov]).catch(function(){ return null; });
+      if (!r || !r.ok) return;
+      if (r.semMudanca){
+        if (r.versao != null && (Sync.versao == null || r.versao > Sync.versao)) Sync.versao = r.versao;
+        return;
+      }
+      if (Sync.estado === "enviando" || Sync.fila.length) return;
+      if (!r.marcas) return;
+      // FIX RACE: comparar com Sync.versao ATUAL, não com cópia capturada antes
+      // do await. Se um push local rodou durante o pull, aplicar esse payload
+      // regride o estado → tela pisca, marcas "voltam". Regra: só aceita
+      // payload ESTRITAMENTE mais novo. Respostas atrasadas são descartadas.
+      if (Sync.versao !== null && r.versao < Sync.versao) return;
+      if (_ultimaRemota > 0 && r.versao === Sync.versao) return;
+      aplicarRemoto(estadoDoServidor(r), ym);
+      Sync.versao = r.versao;
+      _ultimaRemota = Date.now();
+      
+      // Se o usuário estiver vendo a Auditoria, NÃO redesenha a escala por baixo
+      var btnAud = document.getElementById('btnAuditoria');
+      if (!btnAud || !btnAud.classList.contains('active')) {
+        desenhar();
+      }
+      
+      try{ status("atualizado — outro usuário gravou"); }catch(e){}
+      console.log("[sync] atualizado por outro usuário · versao", r.versao);
+    } finally {
+      delete _pullAtivoPorYm[ym];
+    }
+  })();
+
+  _pullAtivoPorYm[ym] = promessa;
+  return promessa;
 }
 
 function agendarPoll(ym){
@@ -5854,45 +5882,57 @@ async function sincronizarMes(ym){
   if (!Transport.disponivel() || !Sessao.token) return false;
   if (Sync.estado === "enviando") return false;
 
-  var desde = (Sync.versao != null && !Sync.fila.length) ? Sync.versao : null;
-  var r = await Transport.call("apiPull", [ym, Sessao.token, desde]).catch(function(){ return null; });
-  if (!r || !r.ok){
-    window.__sync = { ok: false, motivo: (r && (r.erro || "sem resposta")) || "offline" };
-    return false;
-  }
+  if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
 
-  if (r.semMudanca){
-    if (r.versao != null && (Sync.versao == null || r.versao > Sync.versao)) Sync.versao = r.versao;
-    window.__sync = { ok: true, versao: Sync.versao, semMudanca: true, quando: new Date().toISOString() };
-    return true;
-  }
-
-  if (Sync.versao !== null && r.versao < Sync.versao){
-    console.warn("[sync] ignorando pull atrasado — versao", r.versao, "< atual", Sync.versao);
-    return true;
-  }
-
-  Sync.versao = r.versao;
-  aplicarRemoto(estadoDoServidor(r), ym);
-
-  // Servidor sem cadastro: envia o elenco uma vez. Sem ele a ACO por SB é
-  // recusada (podeGravarGrupo consulta elencoMap). Só as seções que este
-  // perfil pode gravar entram — o diff já filtra.
-  if (Sync.ligado && !(r.elenco && r.elenco.length)){
-    try{
-      const atual = estadoSalvavel();
-      const semMes = Object.assign({}, atual, { mes: [] });
-      const opsEl = diffEstado(semMes, atual).filter(function(o){ return o.t === "elenco"; });
-      if (opsEl.length){
-        Sync.enfileirar(ym, opsEl);
-        console.log("[sync] enviando elenco inicial:", opsEl.length, "militar(es)");
+  var promessa = (async function(){
+    try {
+      var desde = (Sync.versao != null && !Sync.fila.length) ? Sync.versao : null;
+      var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
+      var r = await Transport.call("apiPull", [ym, Sessao.token, desde, ultimoMov]).catch(function(){ return null; });
+      if (!r || !r.ok){
+        window.__sync = { ok: false, motivo: (r && (r.erro || "sem resposta")) || "offline" };
+        return false;
       }
-    }catch(e){ console.error("[sync] elenco inicial", e); }
-  }
 
-  window.__sync = { ok: true, versao: r.versao, marcas: (r.marcas || []).length, quando: new Date().toISOString() };
-  console.log("[sync] pull ok — versao", r.versao, "·", (r.marcas || []).length, "marcas");
-  return true;
+      if (r.semMudanca){
+        if (r.versao != null && (Sync.versao == null || r.versao > Sync.versao)) Sync.versao = r.versao;
+        window.__sync = { ok: true, versao: Sync.versao, semMudanca: true, quando: new Date().toISOString() };
+        return true;
+      }
+
+      if (Sync.versao !== null && r.versao < Sync.versao){
+        console.warn("[sync] ignorando pull atrasado — versao", r.versao, "< atual", Sync.versao);
+        return true;
+      }
+
+      Sync.versao = r.versao;
+      aplicarRemoto(estadoDoServidor(r), ym);
+
+      // Servidor sem cadastro: envia o elenco uma vez. Sem ele a ACO por SB é
+      // recusada (podeGravarGrupo consulta elencoMap). Só as seções que este
+      // perfil pode gravar entram — o diff já filtra.
+      if (Sync.ligado && !(r.elenco && r.elenco.length)){
+        try{
+          const atual = estadoSalvavel();
+          const semMes = Object.assign({}, atual, { mes: [] });
+          const opsEl = diffEstado(semMes, atual).filter(function(o){ return o.t === "elenco"; });
+          if (opsEl.length){
+            Sync.enfileirar(ym, opsEl);
+            console.log("[sync] enviando elenco inicial:", opsEl.length, "militar(es)");
+          }
+        }catch(e){ console.error("[sync] elenco inicial", e); }
+      }
+
+      window.__sync = { ok: true, versao: r.versao, marcas: (r.marcas || []).length, quando: new Date().toISOString() };
+      console.log("[sync] pull ok — versao", r.versao, "·", (r.marcas || []).length, "marcas");
+      return true;
+    } finally {
+      delete _pullAtivoPorYm[ym];
+    }
+  })();
+
+  _pullAtivoPorYm[ym] = promessa;
+  return promessa;
 }
 
 /* Mostra na tela as operações que o servidor recusou. Sem isto, a marca

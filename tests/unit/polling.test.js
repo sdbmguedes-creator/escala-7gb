@@ -441,4 +441,107 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       expect(global.clearTimeout).toHaveBeenCalledWith(123);
     });
   });
+
+  describe('Deduplicação de Pull e Mesclagem de Movimentos (Etapa 2)', () => {
+    it('deve deduplicar chamadas concorrentes para a mesma competência em _pullAtivoPorYm', async () => {
+      let callCount = 0;
+      const _pullAtivoPorYm = {};
+
+      const fakeTransportCall = vi.fn().mockImplementation(() => {
+        callCount++;
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({ ok: true, versao: 2, marcas: [], movimentos: [] });
+          }, 50);
+        });
+      });
+
+      const atualizarDoServidor = (ym) => {
+        if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+        const promessa = (async () => {
+          try {
+            return await fakeTransportCall('apiPull', [ym, 'token-123', 1, null]);
+          } finally {
+            delete _pullAtivoPorYm[ym];
+          }
+        })();
+        _pullAtivoPorYm[ym] = promessa;
+        return promessa;
+      };
+
+      // Dispara 2 chamadas concorrentes simultâneas para '2026-11'
+      const p1 = atualizarDoServidor('2026-11');
+      const p2 = atualizarDoServidor('2026-11');
+
+      // Ambas devem apontar para a mesma promessa
+      expect(p1).toBe(p2);
+      expect(_pullAtivoPorYm['2026-11']).toBeDefined();
+
+      vi.advanceTimersByTime(60);
+      const [res1, res2] = await Promise.all([p1, p2]);
+
+      expect(res1.ok).toBe(true);
+      expect(res2.ok).toBe(true);
+      expect(callCount).toBe(1);
+      // Garantir liberação do map no finally
+      expect(_pullAtivoPorYm['2026-11']).toBeUndefined();
+    });
+
+    it('deve limpar _pullAtivoPorYm no finally mesmo quando a chamada falha', async () => {
+      const _pullAtivoPorYm = {};
+      const fakeTransportCall = vi.fn().mockRejectedValue(new Error('Falha de rede'));
+
+      const sincronizarMes = (ym) => {
+        if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+        const promessa = (async () => {
+          try {
+            return await fakeTransportCall('apiPull', [ym, 'token-123']);
+          } finally {
+            delete _pullAtivoPorYm[ym];
+          }
+        })();
+        _pullAtivoPorYm[ym] = promessa;
+        return promessa;
+      };
+
+      const p1 = sincronizarMes('2026-11');
+      expect(_pullAtivoPorYm['2026-11']).toBeDefined();
+
+      await expect(p1).rejects.toThrow('Falha de rede');
+      expect(_pullAtivoPorYm['2026-11']).toBeUndefined();
+    });
+
+    it('deve mesclar e ordenar cronologicamente movimentos sem perder registros', () => {
+      const D = {
+        movimentos: [
+          { quando: '2026-11-01T10:00:00Z', tipo: 'remessa', origem: 'A', destino: 'B', qtd: 2 },
+          { quando: '2026-11-05T12:00:00Z', tipo: 'transferencia', origem: 'B', destino: 'C', qtd: 1 }
+        ]
+      };
+
+      const remotoMovimentos = [
+        // Registro já existente (duplicado)
+        { quando: '2026-11-01T10:00:00Z', tipo: 'remessa', origem: 'A', destino: 'B', qtd: 2 },
+        // Registro mais novo (quando.asc incremental)
+        { quando: '2026-11-10T08:00:00Z', tipo: 'ajuste_escala', origem: 'C', destino: 'A', qtd: 3 },
+        // Registro intermediário fora de ordem
+        { quando: '2026-11-03T09:00:00Z', tipo: 'mudanca_sb', origem: 'X', destino: 'Y', qtd: 1 }
+      ];
+
+      // Lógica de mesclagem idêntica à de aplicarRemoto
+      const idMov = function(m){ return [m.quando, m.tipo, m.origem, m.destino, m.qtd].join('|'); };
+      const mapa = {};
+      (D.movimentos || []).forEach(function(m){ mapa[idMov(m)] = m; });
+      remotoMovimentos.forEach(function(m){ mapa[idMov(m)] = m; });
+      D.movimentos = Object.values(mapa).sort(function(a, b){
+        return String(a.quando || '').localeCompare(String(b.quando || ''));
+      });
+
+      expect(D.movimentos.length).toBe(4);
+      expect(D.movimentos[0].quando).toBe('2026-11-01T10:00:00Z');
+      expect(D.movimentos[1].quando).toBe('2026-11-03T09:00:00Z');
+      expect(D.movimentos[2].quando).toBe('2026-11-05T12:00:00Z');
+      expect(D.movimentos[3].quando).toBe('2026-11-10T08:00:00Z');
+    });
+  });
 });
