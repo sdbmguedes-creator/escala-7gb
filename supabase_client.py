@@ -4,6 +4,13 @@ import urllib.request
 import urllib.error
 import urllib.parse
 
+try:
+    import requests as _requests
+    _HTTP_SESSION = _requests.Session()
+except Exception:
+    _requests = None
+    _HTTP_SESSION = None
+
 
 def _get_supabase_config():
     url = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
@@ -35,8 +42,17 @@ def sb_request(method, path, params=None, body=None, extra_headers=None, prefer=
 
     data = json.dumps(body).encode("utf-8") if body is not None else None
 
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
+        if _HTTP_SESSION is not None:
+            resp = _HTTP_SESSION.request(method, url, headers=headers, data=data, timeout=15)
+            if resp.status_code == 204:
+                return None
+            txt = resp.text
+            if resp.status_code >= 400:
+                raise Exception(f"Supabase {resp.status_code}: {txt}")
+            return json.loads(txt) if txt else None
+
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=15) as r:
             if r.status == 204:
                 return None
@@ -47,7 +63,6 @@ def sb_request(method, path, params=None, body=None, extra_headers=None, prefer=
         raise Exception(f"Supabase {e.code}: {corpo}")
     except Exception as e:
         raise Exception(f"Erro ao contatar Supabase: {e}")
-
 
 def sb_select(path, filters=None, order=None, limit=None):
     """Busca linhas via PostgREST.

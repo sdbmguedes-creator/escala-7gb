@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler
+from concurrent.futures import ThreadPoolExecutor
 import os, sys, json, hashlib, uuid, datetime
 from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -559,18 +560,26 @@ class Handler(BaseHTTPRequestHandler):
 
         extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
 
-        # FIX B — nunca retornar payload vazio (semMudanca): frontend pode
-        # sobrescrever estado local com undefined. Retornamos sempre completo.
-        marcas = sb_select("marcas", {"competencia": competencia}) or []
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            fut_marcas = pool.submit(lambda: sb_select("marcas", {"competencia": competencia}) or [])
+            fut_comments = pool.submit(lambda: sb_select("comments", {"competencia": competencia}) or [])
+            fut_elenco = pool.submit(lambda: sb_select("elenco", {"competencia": competencia}) or [])
+            fut_aco = pool.submit(lambda: sb_select("aco_oficiais", {"competencia": competencia}) or [])
+            fut_mov = pool.submit(lambda: sb_select("movimentos", {"competencia": competencia}) or [])
+
+            marcas = fut_marcas.result()
+            comentarios = fut_comments.result()
+            elenco = fut_elenco.result()
+            aco_rows = fut_aco.result()
+            mov = fut_mov.result()
+
         marcas_out = [
             {"g": m["grupo"], "i": m["militar_id"], "d": m["dia"], "c": m["codigo"]}
             for m in marcas
         ]
 
-        comentarios = sb_select("comments", {"competencia": competencia}) or []
         comentarios_out = [{"k": c["chave"], "v": c["texto"]} for c in comentarios]
 
-        elenco = sb_select("elenco", {"competencia": competencia}) or []
         elenco_out = []
         for e in elenco:
             elenco_out.append({
@@ -586,12 +595,9 @@ class Handler(BaseHTTPRequestHandler):
                 "escalaOrigemAdm": e.get("escala_origem_adm", ""),
             })
 
-        aco_rows = sb_select("aco_oficiais", {"competencia": competencia}) or []
         aco_oficiais = {}
         for r in aco_rows:
             aco_oficiais.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
-
-        mov = sb_select("movimentos", {"competencia": competencia}) or []
         movimentos = [
             {
                 "quando":   m["quando"],

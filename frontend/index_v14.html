@@ -5862,8 +5862,13 @@ async function sincronizarMes(ym){
   }
 
   if (r.semMudanca){
-    if (r.versao != null) Sync.versao = r.versao;
+    if (r.versao != null && (Sync.versao == null || r.versao > Sync.versao)) Sync.versao = r.versao;
     window.__sync = { ok: true, versao: Sync.versao, semMudanca: true, quando: new Date().toISOString() };
+    return true;
+  }
+
+  if (Sync.versao !== null && r.versao < Sync.versao){
+    console.warn("[sync] ignorando pull atrasado — versao", r.versao, "< atual", Sync.versao);
     return true;
   }
 
