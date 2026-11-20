@@ -5537,6 +5537,22 @@ function mudarCompetencia(v){
   carregarEstado();
   desenhar();
   status("competência: " + mesAnoBR(v));
+
+  // Ao trocar de competência, reseta os cursores para que a versão de outro mês
+  // não bloqueie ou contamine a nova competência.
+  if (typeof Sync !== "undefined") {
+    Sync.versao = null;
+    _ultimaRemota = 0;
+    if (Sync.ligado && typeof sincronizarMes === "function") {
+      sincronizarMes(v).then(function(ok){
+        if (ok) {
+          carregarEstado();
+          desenhar();
+        }
+        if (typeof agendarPoll === "function") agendarPoll(v);
+      });
+    }
+  }
 }
 
 function abrirListaLegado(){

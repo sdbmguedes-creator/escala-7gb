@@ -543,5 +543,33 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       expect(D.movimentos[2].quando).toBe('2026-11-05T12:00:00Z');
       expect(D.movimentos[3].quando).toBe('2026-11-10T08:00:00Z');
     });
+
+    it('deve resetar Sync.versao e _ultimaRemota ao trocar de competência para evitar bloqueio por versão', () => {
+      // Simula estado anterior com versão alta em 2026-11
+      const SyncMock = { versao: 42, ligado: true };
+      let _ultimaRemotaMock = 1700000000;
+      const D = { competencia: '2026-11-01' };
+      const sincronizarMesMock = vi.fn().mockResolvedValue(true);
+      const agendarPollMock = vi.fn();
+
+      const mudarCompetencia = (v) => {
+        if (!v) return;
+        D.competencia = v + '-01';
+        SyncMock.versao = null;
+        _ultimaRemotaMock = 0;
+        if (SyncMock.ligado) {
+          sincronizarMesMock(v).then((ok) => {
+            if (ok) agendarPollMock(v);
+          });
+        }
+      };
+
+      mudarCompetencia('2026-12');
+
+      expect(D.competencia).toBe('2026-12-01');
+      expect(SyncMock.versao).toBeNull();
+      expect(_ultimaRemotaMock).toBe(0);
+      expect(sincronizarMesMock).toHaveBeenCalledWith('2026-12');
+    });
   });
 });
