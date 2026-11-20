@@ -1276,6 +1276,16 @@ function gravarMes(ym, j){
     // GANCHO DO BACKEND: enfileira só a diferença desde o último sync.
     if (typeof Sync !== "undefined" && Sync && Sync.ligado && typeof Sync.enfileirar === "function"){
       const ops = diffEstado(_ultimoSync[ym] || null, j);
+      const deletes = ops.filter(function(op){
+        return op && op.t === "marca" && (op.v === "" || op.v === null || op.v === undefined);
+      });
+
+      if (deletes.length > 500) {
+        console.warn("[escala7gb] diff bloqueado: tentaria apagar", deletes.length, "marcas em", ym);
+        _ultimoSync[ym] = JSON.parse(JSON.stringify(j));
+        return true;
+      }
+
       if (ops.length) Sync.enfileirar(ym, ops);
       _ultimoSync[ym] = JSON.parse(JSON.stringify(j));
     }

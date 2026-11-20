@@ -52,15 +52,24 @@ def resolver_token(token):
     return {"perfil": s.get("perfil"), "nome": s.get("nome")}
 
 
+def _norm_secao(val):
+    return "".join(str(val or "").strip().upper().split())
+
 def pode_gravar(perfil, grupo, militar_id, elenco_map):
     if perfil in ("Admin", "Mestre"):
         return True
-    g = str(grupo)
-    if g == "ACO":
+    g = str(grupo or "").strip()
+    p_norm = _norm_secao(perfil)
+    if g.upper() == "ACO":
         m2 = elenco_map.get(militar_id)
-        return bool(m2 and str(m2.get("secao")) == str(perfil))
-    alvo = g[4:] if g.startswith("ADM:") else (g[5:] if g.startswith("host:") else g)
-    return alvo == perfil
+        return bool(m2 and _norm_secao(m2.get("secao")) == p_norm)
+    if g.upper().startswith("ADM:"):
+        alvo = g[4:]
+    elif g.lower().startswith("host:"):
+        alvo = g[5:]
+    else:
+        alvo = g
+    return _norm_secao(alvo) == p_norm
 
 
 PERFIS_VALIDOS = ["Admin", "Mestre", "1ªSB", "2ªSB", "3ªSB", "4ªSB"]
