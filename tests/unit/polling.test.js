@@ -15,6 +15,8 @@ Object.defineProperty(global, 'localStorage', { value: localStorageMock });
 
 // Mock do Date.now para controle de tempo
 
+let _ultimaRemotaPorYm = {};
+
 describe('Polling e Sincronização - Testes Preventivos', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -26,7 +28,8 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
     global._pollTimer = null;
     global._pollTick = 0;
     global._ultimaInteracao = 0;
-    global._ultimaRemotaPorYm = {};
+    _ultimaRemotaPorYm = {};
+    global._ultimaRemotaPorYm = _ultimaRemotaPorYm;
     global.Sync = {
       ligado: true,
       fila: [],
@@ -613,18 +616,10 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
   });
 
   describe('reaplicarFilaPendenteLocal - todos os tipos de op', () => {
-    let marks, comments, vis, D, Sync;
+    let marks, Sync;
 
     beforeEach(() => {
       marks = { '1ªSB|1|2026-11-01': 'X' };
-      comments = { '1ªSB|1|2026-11-01': 'nota antiga' };
-      vis = { '1ªSB': ['user1', 'user2'] };
-      D = {
-        visLinhas: { '1ªSB': '10,20' },
-        mes: [
-          { id: '1', secao: '1ªSB', escala: 'A', motorista: '', adm: 'N', restricao: false, cotasAdm: 0, afast: [], escalaOrigem: '', escalaOrigemAdm: '' }
-        ]
-      };
       Sync = {
         fila: [],
         ligado: true,
@@ -674,10 +669,9 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
   });
 
   describe('reaplicarFilaPendenteLocal - comment, vis, aco, elenco', () => {
-    let marks, comments, vis, D, Sync;
+    let comments, vis, D, Sync;
 
     beforeEach(() => {
-      marks = { '1ªSB|1|2026-11-01': 'X' };
       comments = { '1ªSB|1|2026-11-01': 'nota antiga' };
       vis = { '1ªSB': ['user1', 'user2'] };
       D = {
@@ -781,12 +775,9 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
   });
 
   describe('reaplicarFilaPendenteLocal - aco, elenco', () => {
-    let marks, comments, vis, D, Sync;
+    let D, Sync;
 
     beforeEach(() => {
-      marks = { '1ªSB|1|2026-11-01': 'X' };
-      comments = { '1ªSB|1|2026-11-01': 'nota antiga' };
-      vis = { '1ªSB': ['user1', 'user2'] };
       D = {
         visLinhas: { '1ªSB': '10,20' },
         mes: [
@@ -880,16 +871,14 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
 
   describe('Debounce _pullAtivoPorYm (2000ms)', () => {
     let _pullAtivoPorYm, _ultimoPullPorYm, PULL_DEBOUNCE_MS;
-    let fakeTransportCall, Sync, Sessao, D, Transport, _ultimaInteracao, _ultimaRemotaPorYm;
-    let atualizarDoServidor, sincronizarMes;
+    let fakeTransportCall, Sync, Sessao, D, Transport;
+    let atualizarDoServidor;
 
     beforeEach(() => {
       vi.useFakeTimers();
       _pullAtivoPorYm = {};
       _ultimoPullPorYm = {};
       PULL_DEBOUNCE_MS = 2000;
-      _ultimaInteracao = Date.now() - 5000;
-      _ultimaRemotaPorYm = {};
       
       Sync = { ligado: true, estado: 'ok', fila: [], versaoPorYm: {'2026-11': 1}, enfileirar: vi.fn(), flush: vi.fn(), pintar: vi.fn(), agendar: vi.fn() };
       Sessao = { token: 'token-123' };
@@ -924,33 +913,6 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
         _pullAtivoPorYm[ym] = promessa;
         return promessa;
       };
-      
-      sincronizarMes = async (ym) => {
-        if (!Transport.disponivel() || !Sessao.token) return false;
-        if (Sync.estado === 'enviando') return false;
-        
-        var agora = Date.now();
-        if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
-        if (_ultimoPullPorYm[ym] && (agora - _ultimoPullPorYm[ym]) < PULL_DEBOUNCE_MS) {
-          return Promise.resolve(false);
-        }
-        
-        var versaoAtual = Sync.versaoPorYm[ym] || null;
-        var promessa = (async () => {
-          try {
-            var desde = (versaoAtual != null && !Sync.fila.length) ? versaoAtual : null;
-            var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
-            var r = await Transport.call('apiPull', [ym, Sessao.token, desde, ultimoMov]).catch(() => null);
-            return r;
-          } finally {
-            delete _pullAtivoPorYm[ym];
-            _ultimoPullPorYm[ym] = Date.now();
-          }
-        })();
-        
-        _pullAtivoPorYm[ym] = promessa;
-        return promessa;
-      };
     });
 
     afterEach(() => {
@@ -975,7 +937,7 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
 
   describe('Debounce _pullAtivoPorYm - continuar', () => {
     let _pullAtivoPorYm, _ultimoPullPorYm, PULL_DEBOUNCE_MS;
-    let fakeTransportCall, Sync, Sessao, D, Transport, _ultimaInteracao, _ultimaRemotaPorYm;
+    let fakeTransportCall, Sync, Sessao, D, Transport;
     let atualizarDoServidor, sincronizarMes;
 
     beforeEach(() => {
@@ -983,8 +945,6 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       _pullAtivoPorYm = {};
       _ultimoPullPorYm = {};
       PULL_DEBOUNCE_MS = 2000;
-      _ultimaInteracao = Date.now() - 5000;
-      _ultimaRemotaPorYm = {};
       
       Sync = { ligado: true, estado: 'ok', fila: [], versaoPorYm: {'2026-11': 1}, enfileirar: vi.fn(), flush: vi.fn(), pintar: vi.fn(), agendar: vi.fn() };
       Sessao = { token: 'token-123' };
@@ -1074,14 +1034,11 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
   });
 
   describe('mudarCompetencia - preservar fila pendente', () => {
-    let Sync, D, Sessao, Transport, _pullAtivoPorYm, _ultimoPullPorYm, PULL_DEBOUNCE_MS;
-    let fakeTransportCall, flushCalls;
+    let Sync;
+    let flushCalls;
 
     beforeEach(() => {
       vi.useFakeTimers();
-      _pullAtivoPorYm = {};
-      _ultimoPullPorYm = {};
-      PULL_DEBOUNCE_MS = 2000;
       
       flushCalls = 0;
       Sync = { 
@@ -1094,11 +1051,6 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
         pintar: vi.fn(),
         agendar: vi.fn()
       };
-      Sessao = { token: 'token-123' };
-      D = { competencia: '2026-11-01', movimentos: [] };
-      
-      fakeTransportCall = vi.fn().mockResolvedValue({ ok: true, versao: 2, marcas: [] });
-      Transport = { disponivel: () => true, call: fakeTransportCall };
     });
 
     afterEach(() => {
