@@ -1451,10 +1451,36 @@ function diffEstado(antes, depois){
   const ops = [];
   const ts = Date.now();
 
+  const _ehGlobal = (typeof ehMestre === "function" && ehMestre()) ||
+                  (typeof perfilAtual === "string" && (perfilAtual === "Admin" || perfilAtual === "Mestre"));
+  const _normSec = function(s){
+    return String(s || "").replace(/\s+/g, "").toUpperCase();
+  };
+  const _meuNorm = _normSec(typeof perfilAtual !== "undefined" ? perfilAtual : "");
+
+  const _chavePertenceAoMeuPerfil = function(chave){
+    if (_ehGlobal) return true;
+    const partes = String(chave || "").split("|");
+    const grupo = String(partes[0] || "").trim();
+    const milId = partes[1];
+
+    if (grupo.toUpperCase() === "ACO") {
+      const listaElenco = (depois && depois.mes) || (antes && antes.mes) || [];
+      const encontrado = listaElenco.find(function(m){ return String(m.id) === String(milId); });
+      return !!(encontrado && _normSec(encontrado.secao) === _meuNorm);
+    }
+
+    let alvo = grupo;
+    if (grupo.toUpperCase().startsWith("ADM:")) alvo = grupo.slice(4);
+    else if (grupo.toLowerCase().startsWith("host:")) alvo = grupo.slice(5);
+    return _normSec(alvo) === _meuNorm;
+  };
+
   // 1) marcas — por chave
   const A = (antes && antes.marks) || {}, B = (depois && depois.marks) || {};
   const chaves = new Set(Object.keys(A).concat(Object.keys(B)));
   chaves.forEach(function(k){
+    if (!_chavePertenceAoMeuPerfil(k)) return;
     const va = A[k] || "", vb = B[k] || "";
     if (va !== vb) ops.push({t:"marca", k:k, v:vb, ts:ts});
   });
@@ -1462,9 +1488,41 @@ function diffEstado(antes, depois){
   // 1b) comentários — por chave (mesmo padrão das marcas)
   const cA = (antes && antes.comments) || {}, cB = (depois && depois.comments) || {};
   new Set(Object.keys(cA).concat(Object.keys(cB))).forEach(function(k){
+    if (!_chavePertenceAoMeuPerfil(k)) return;
     const va = cA[k] || "", vb = cB[k] || "";
     if (va !== vb) ops.push({t:"comment", k:k, v:vb, ts:ts});
   });
+
+  if (!_ehGlobal) {
+    // 5a) VISITANTES — apenas da própria SB
+    const visA = (antes && antes.vis) || {}, visB = (depois && depois.vis) || {};
+    const vlA = (antes && antes.visLinhas) || {}, vlB = (depois && depois.visLinhas) || {};
+    new Set(Object.keys(visA).concat(Object.keys(visB), Object.keys(vlA), Object.keys(vlB))).forEach(function(sb){
+      if (_normSec(sb) !== _meuNorm) return;
+      const la = (visA[sb] || []).join(",");
+      const lb = (visB[sb] || []).join(",");
+      const qa = vlA[sb], qb = vlB[sb];
+      if (la !== lb || qa !== qb){
+        ops.push({ t: "vis", sb: sb, lista: visB[sb] || [], linhas: qb, ts: ts });
+      }
+    });
+
+    // 5c) ACO — apenas militares da própria seção
+    const listaEl = (depois && depois.mes) || (antes && antes.mes) || [];
+    const ehDaMinhaSec = function(id){
+      const m = listaEl.find(function(x){ return String(x.id) === String(id); });
+      return !!(m && _normSec(m.secao) === _meuNorm);
+    };
+    const acoA = ((antes && antes.aco) || []).filter(function(x){ return !!x && ehDaMinhaSec(x); });
+    const acoB = ((depois && depois.aco) || []).filter(function(x){ return !!x && ehDaMinhaSec(x); });
+    const acoAdd = acoB.filter(function(id){ return acoA.indexOf(id) < 0; });
+    const acoDel = acoA.filter(function(id){ return acoB.indexOf(id) < 0; });
+    if (acoAdd.length || acoDel.length){
+      ops.push({ t: "aco", add: acoAdd, del: acoDel, ts: ts });
+    }
+
+    return ops;
+  }
 
   // 2) elenco — por militar, campo a campo
   const mA = indexarPorId((antes && antes.mes) || []);
