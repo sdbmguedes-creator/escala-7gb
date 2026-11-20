@@ -15,7 +15,7 @@ def _get_supabase_config():
     return url, key
 
 
-def sb_request(method, path, params=None, body=None, extra_headers=None):
+def sb_request(method, path, params=None, body=None, extra_headers=None, prefer="return=representation"):
     """Faz requisição REST para o Supabase."""
     supabase_url, supabase_key = _get_supabase_config()
     clean_path = path.lstrip("/")
@@ -28,7 +28,7 @@ def sb_request(method, path, params=None, body=None, extra_headers=None):
         "apikey": supabase_key,
         "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json",
-        "Prefer": "return=representation",
+        "Prefer": prefer,
     }
     if extra_headers:
         headers.update(extra_headers)
@@ -94,11 +94,11 @@ def sb_select(path, filters=None, order=None, limit=None):
 def sb_upsert(path, rows):
     if not rows:
         return None
-    return sb_request("POST", path, body=rows)
+    return sb_request("POST", path, body=rows, prefer="return=minimal")
 
 
 def sb_delete(path, filters):
     params = {}
     for k, v in filters.items():
         params[k] = f"eq.{v}"
-    return sb_request("DELETE", path, params=params)
+    return sb_request("DELETE", path, params=params, prefer="return=minimal")

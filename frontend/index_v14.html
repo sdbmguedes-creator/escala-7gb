@@ -5659,7 +5659,7 @@ function aplicarRemoto(remoto, ym){
    Cada consulta é uma execução no Apps Script: 5 s fixo estouraria a cota. */
 var _ultimaInteracao = 0, _ultimaRemota = 0, _pollTimer = null, _pollTick = 0;
 // Polling otimizado: 30s ativo, 5min ocioso, janela 10min. Evita egress excessivo.
-var PULL_ATIVO_MS = 30000, PULL_OCIOSO_TICKS = 10, JANELA_ATIVO_MS = 600000;
+var PULL_ATIVO_MS = 15000, PULL_OCIOSO_TICKS = 12, JANELA_ATIVO_MS = 300000;
 function _marcarInteracao(){ _ultimaInteracao = Date.now(); }
 document.addEventListener("pointerdown", _marcarInteracao, true);
 document.addEventListener("keydown", _marcarInteracao, true);

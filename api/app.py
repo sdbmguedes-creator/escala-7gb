@@ -496,6 +496,9 @@ class Handler(BaseHTTPRequestHandler):
         corpo = read_body(self)
         competencia = corpo.get("competencia", "2026-11")[:7]
         token = corpo.get("token", "")
+        desde_versao = corpo.get("desdeVersao")
+        if desde_versao is None:
+            desde_versao = corpo.get("versao")
 
         u = resolver_token(token)
         if not u:
@@ -504,6 +507,11 @@ class Handler(BaseHTTPRequestHandler):
 
         meta_rows = sb_select("meta", {"competencia": competencia}) or []
         versao = meta_rows[0].get("versao", 0) if meta_rows else 0
+
+        if desde_versao is not None and int(desde_versao) == int(versao):
+            json_response(self, {"ok": True, "semMudanca": True, "versao": versao})
+            return
+
         extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
 
         # FIX B — nunca retornar payload vazio (semMudanca): frontend pode
