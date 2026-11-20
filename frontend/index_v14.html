@@ -648,7 +648,26 @@ function marcasDoMilitarDia(id, diaISO){
 function chaveLocal(){ return "escala7gb-"+String(D.competencia).slice(0,7); }
 function ordemPessoasAtual(){ const o = {}; D.pessoas.forEach(function(p){ o[p.id] = p.ordem; }); return o; }
 function estadoSalvavel(){
-  return {_v:3,marks,comments,vis,visLinhas:D.visLinhas,aco,params:D.params,mes:D.mes,afastMesclado:afastMesclado,removidos:D.removidos,acoOficiais:D.acoOficiais,confFixos:D.confFixos||[],ordemPessoas:ordemPessoasAtual(),autoX:autoX,statusMes:statusMes,snapshot:D.snapshot,movimentos:D.movimentos};
+  const movsLeves = Array.isArray(D.movimentos) ? D.movimentos.slice(-50) : [];
+  return {
+    _v:3,
+    marks,
+    comments,
+    vis,
+    visLinhas:D.visLinhas,
+    aco,
+    params:D.params,
+    mes:D.mes,
+    afastMesclado:afastMesclado,
+    removidos:D.removidos,
+    acoOficiais:D.acoOficiais,
+    confFixos:D.confFixos||[],
+    ordemPessoas:ordemPessoasAtual(),
+    autoX:autoX,
+    statusMes:statusMes,
+    snapshot:D.snapshot,
+    movimentos:movsLeves
+  };
 }
 // Aplica um estado salvo/importado de forma única (substitui, não mescla): usado por init, carregarEstado e importar.
 function aplicarEstado(j){
@@ -1271,31 +1290,50 @@ function lerMes(ym){
 
 function gravarMes(ym, j){
   if (!ym || !j) return false;
+  const payload = JSON.stringify(j);
   try{
-    localStorage.setItem(chaveDeMes(ym), JSON.stringify(j));
-    // GANCHO DO BACKEND: enfileira só a diferença desde o último sync.
-    if (typeof Sync !== "undefined" && Sync && Sync.ligado && typeof Sync.enfileirar === "function"){
-      const ops = diffEstado(_ultimoSync[ym] || null, j);
-      const deletes = ops.filter(function(op){
-        return op && op.t === "marca" && (op.v === "" || op.v === null || op.v === undefined);
-      });
-
-      if (deletes.length > 500) {
-        console.warn("[escala7gb] diff bloqueado: tentaria apagar", deletes.length, "marcas em", ym);
-        _ultimoSync[ym] = JSON.parse(JSON.stringify(j));
-        return true;
-      }
-
-      if (ops.length) Sync.enfileirar(ym, ops);
-      _ultimoSync[ym] = JSON.parse(JSON.stringify(j));
-    }
-    return true;
+    localStorage.setItem(chaveDeMes(ym), payload);
   }catch(e){
-    console.error("[escala7gb] gravarMes", ym, e);
-    return false;
+    if (e && e.name === "QuotaExceededError") {
+      try {
+        Object.keys(localStorage).forEach(function(k){
+          if (k.startsWith("escala7gb-20") && k !== chaveDeMes(ym)) {
+            localStorage.removeItem(k);
+          }
+        });
+        localStorage.setItem(chaveDeMes(ym), payload);
+      } catch(e2) {
+        try {
+          const enxuto = Object.assign({}, j, { snapshot: null, movimentos: [] });
+          localStorage.setItem(chaveDeMes(ym), JSON.stringify(enxuto));
+        } catch(e3) {
+          console.warn("[escala7gb] localStorage cheio em", ym, "— seguindo apenas em memória/sync");
+        }
+      }
+    } else {
+      console.error("[escala7gb] gravarMes", ym, e);
+      return false;
+    }
   }
-}
 
+  // GANCHO DO BACKEND: enfileira só a diferença desde o último sync.
+  if (typeof Sync !== "undefined" && Sync && Sync.ligado && typeof Sync.enfileirar === "function"){
+    const ops = diffEstado(_ultimoSync[ym] || null, j);
+    const deletes = ops.filter(function(op){
+      return op && op.t === "marca" && (op.v === "" || op.v === null || op.v === undefined);
+    });
+
+    if (deletes.length > 500) {
+      console.warn("[escala7gb] diff bloqueado: tentaria apagar", deletes.length, "marcas em", ym);
+      _ultimoSync[ym] = JSON.parse(JSON.stringify(j));
+      return true;
+    }
+
+    if (ops.length) Sync.enfileirar(ym, ops);
+    _ultimoSync[ym] = JSON.parse(JSON.stringify(j));
+  }
+  return true;
+}
 /* ============================================================================
    F5.3 — ETAPA 5: PUSH
    Fila de operações pendentes + envio em lote. Enquanto ligado=false (file://),
