@@ -11,6 +11,15 @@ from utils import json_response, read_body
 # Helpers compartilhados
 # ============================================================
 
+def dedup_rows(rows, chave):
+    """Remove linhas duplicadas pela chave de conflito, mantendo a ÚLTIMA.
+    Evita PostgreSQL 21000 (ON CONFLICT DO UPDATE afetando a mesma linha 2x)."""
+    vistos = {}
+    for r in rows:
+        vistos[tuple(str(r.get(c)) for c in chave)] = r
+    return list(vistos.values())
+
+
 def hash_pin(pin, salt):
     return hashlib.sha256((salt + str(pin)).encode("utf-8")).hexdigest()
 
@@ -982,7 +991,7 @@ class Handler(BaseHTTPRequestHandler):
             if marcas_upsert:
                 sb_request(
                     "POST", "marcas",
-                    body=list(marcas_upsert.values()),
+                    body=dedup_rows(list(marcas_upsert.values()), ("competencia", "grupo", "militar_id", "dia")),
                     params={"on_conflict": "competencia,grupo,militar_id,dia"},
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
@@ -1003,7 +1012,7 @@ class Handler(BaseHTTPRequestHandler):
             if comments_upsert:
                 sb_request(
                     "POST", "comments",
-                    body=list(comments_upsert.values()),
+                    body=dedup_rows(list(comments_upsert.values()), ("competencia", "chave")),
                     params={"on_conflict": "competencia,chave"},
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
@@ -1016,7 +1025,7 @@ class Handler(BaseHTTPRequestHandler):
             if elenco_upsert:
                 sb_request(
                     "POST", "elenco",
-                    body=list(elenco_upsert.values()),
+                    body=dedup_rows(list(elenco_upsert.values()), ("competencia", "militar_id")),
                     params={"on_conflict": "competencia,militar_id"},  # PK == business key, mas explícito não machuca
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
@@ -1030,7 +1039,7 @@ class Handler(BaseHTTPRequestHandler):
                     })
                 sb_request(
                     "POST", "aco_oficiais",
-                    body=aco_rows_out,
+                    body=dedup_rows(aco_rows_out, ("competencia", "dia", "turno")),
                     params={"on_conflict": "competencia,dia,turno"},
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )

@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 
 // Mock do localStorage
 const localStorageMock = (() => {
@@ -1084,5 +1086,79 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       
       expect(flushCalls).toBe(0);
     });
+  });
+});
+
+describe('Fila fantasma e coalescência (código real de index_v14.html)', () => {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../frontend/index_v14.html'), 'utf8');
+  const helpers = html.split('/* @@sync-helpers-begin */')[1].split('/* @@sync-helpers-end */')[0];
+  const { opsDeGravacao, coalescerOps } = new Function(helpers + '; return { opsDeGravacao, coalescerOps };')();
+  const enfSrc = html.match(/enfileirar: function\(ym, ops\)\{[\s\S]*?\r?\n  \},\r?\n/)[0].replace(/,\s*$/, '');
+  const novoSync = () => {
+    const Sync = { ligado: true, fila: [], suprimir: 0, guardarFila: vi.fn(), agendar: vi.fn() };
+    Sync.enfileirar = new Function('Sync', 'coalescerOps', 'return {' + enfSrc + '}.enfileirar;')(Sync, coalescerOps);
+    return Sync;
+  };
+  const diffFalso = (antes, depois) => Object.keys(depois.marks)
+    .filter(k => antes.marks[k] !== depois.marks[k]).map(k => ({ t: 'marca', k, v: depois.marks[k] }));
+  const marcas = {};
+  for (let i = 1; i <= 1476; i++) marcas['1ªSB|' + i + '|2026-11-01'] = 'X';
+
+  it('sem baseline (login/pull/troca de competência) gera 0 ops', () => {
+    expect(opsDeGravacao(undefined, { marks: marcas }, diffFalso)).toEqual([]);
+    expect(opsDeGravacao(null, { marks: marcas }, diffFalso)).toEqual([]);
+  });
+
+  it('com baseline só enfileira a diferença real (ação do usuário)', () => {
+    const depois = Object.assign({}, marcas, { '1ªSB|1|2026-11-01': 'F' });
+    const ops = opsDeGravacao({ marks: marcas }, { marks: depois }, diffFalso);
+    expect(ops).toEqual([{ t: 'marca', k: '1ªSB|1|2026-11-01', v: 'F' }]);
+  });
+
+  it('login/pull e troca nov -> out -> nov deixam fila com 0 pendências', () => {
+    const Sync = novoSync();
+    const baseline = {};
+    const gravar = (ym, estado) => {
+      const ops = opsDeGravacao(baseline[ym], estado, diffFalso);
+      if (ops.length) Sync.enfileirar(ym, ops);
+      baseline[ym] = JSON.parse(JSON.stringify(estado));
+    };
+    gravar('2026-11', { marks: marcas });   // login + pull
+    gravar('2026-10', { marks: {} });       // troca para mês vazio
+    gravar('2026-11', { marks: marcas });   // volta
+    expect(Sync.fila.length).toBe(0);
+  });
+
+  it('enfileirar é no-op enquanto Sync.suprimir > 0 (carga/aplicarRemoto)', () => {
+    const Sync = novoSync();
+    Sync.suprimir = 1;
+    Sync.enfileirar('2026-11', [{ t: 'marca', k: 'a|1|2026-11-01', v: 'X' }]);
+    expect(Sync.fila.length).toBe(0);
+    Sync.suprimir = 0;
+    Sync.enfileirar('2026-11', [{ t: 'marca', k: 'a|1|2026-11-01', v: 'X' }]);
+    expect(Sync.fila.length).toBe(1);
+  });
+
+  it('deduplica a fila: mantém só a última op por chave lógica', () => {
+    const Sync = novoSync();
+    Sync.enfileirar('2026-11', [{ t: 'marca', k: 'a|1|2026-11-01', v: 'X' }, { t: 'comment', k: 'c', v: '1' }]);
+    Sync.enfileirar('2026-11', [{ t: 'marca', k: 'a|1|2026-11-01', v: 'F' }, { t: 'comment', k: 'c', v: '2' }]);
+    Sync.enfileirar('2026-11', [{ t: 'marca', k: 'a|1|2026-11-01', v: '' }]);
+    expect(Sync.fila.length).toBe(1);
+    expect(Sync.fila[0].ops).toEqual([
+      { t: 'comment', k: 'c', v: '2' },
+      { t: 'marca', k: 'a|1|2026-11-01', v: '' }
+    ]);
+  });
+
+  it('coalescerOps funde campos de elenco e preserva mov', () => {
+    const out = coalescerOps([
+      { t: 'elenco', id: '1', campos: { secao: 'A' } },
+      { t: 'mov', dados: { qtd: 1 } },
+      { t: 'elenco', id: '1', campos: { escala: 'B' } },
+      { t: 'mov', dados: { qtd: 1 } }
+    ]);
+    expect(out.filter(o => o.t === 'mov').length).toBe(2);
+    expect(out.find(o => o.t === 'elenco').campos).toEqual({ secao: 'A', escala: 'B' });
   });
 });

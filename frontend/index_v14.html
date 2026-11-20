@@ -978,6 +978,11 @@ function importar(inp){
 }
 
 function carregarEstado(){
+  if (typeof Sync !== "undefined") Sync.suprimir++;
+  try { return _carregarEstado(); }
+  finally { if (typeof Sync !== "undefined") Sync.suprimir--; }
+}
+function _carregarEstado(){
   D.params = {
     metaBM: Object.assign({}, D.params.metaBM),
     metaMot: Object.assign({}, D.params.metaMot),
@@ -1318,7 +1323,10 @@ function gravarMes(ym, j){
 
   // GANCHO DO BACKEND: enfileira só a diferença desde o último sync.
   if (typeof Sync !== "undefined" && Sync && Sync.ligado && typeof Sync.enfileirar === "function"){
-    const ops = diffEstado(_ultimoSync[ym] || null, j);
+    // Sem baseline (login, 1ª visita à competência, troca de mês) NÃO há ação do
+    // usuário a enviar: apenas adota o estado atual como baseline (antes o diff
+    // contra null enfileirava TODAS as marcas/elenco como "novos").
+    const ops = opsDeGravacao(_ultimoSync[ym], j, diffEstado);
     const deletes = ops.filter(function(op){
       return op && op.t === "marca" && (op.v === "" || op.v === null || op.v === undefined);
     });
@@ -1334,6 +1342,38 @@ function gravarMes(ym, j){
   }
   return true;
 }
+/* @@sync-helpers-begin */
+/* Ops a enfileirar numa gravação local. Sem baseline => [] (nada a enviar). */
+function opsDeGravacao(baseline, atual, diffFn){
+  if (!baseline) return [];
+  return diffFn(baseline, atual) || [];
+}
+/* Coalescência: mantém só a ÚLTIMA op por chave lógica (evita duplicatas no lote
+   → PostgreSQL 21000). Ops sem chave (mov, aco) são preservadas em ordem. */
+function coalescerOps(ops){
+  var saida = [], idx = {};
+  (ops || []).forEach(function(op){
+    if (!op) return;
+    var chave = null;
+    if (op.t === "marca" || op.t === "comment") chave = op.t + "|" + op.k;
+    else if (op.t === "elenco") chave = "elenco|" + op.id;
+    else if (op.t === "vis") chave = "vis|" + op.sb;
+    else if (op.t === "oficial") chave = "oficial|" + op.dia + "|" + op.turno;
+    else if (op.t === "meta") chave = "meta";
+    if (chave === null){ saida.push(op); return; }
+    if (chave in idx){
+      var ant = saida[idx[chave]];
+      if (op.t === "elenco" && ant && ant.campos && op.campos){
+        op = Object.assign({}, op, { campos: Object.assign({}, ant.campos, op.campos) });
+      }
+      saida[idx[chave]] = null;
+    }
+    idx[chave] = saida.length;
+    saida.push(op);
+  });
+  return saida.filter(Boolean);
+}
+/* @@sync-helpers-end */
 /* ============================================================================
    F5.3 — ETAPA 5: PUSH
    Fila de operações pendentes + envio em lote. Enquanto ligado=false (file://),
@@ -1345,6 +1385,7 @@ const Sync = {
   timer: null,
   estado: "offline",     // offline | ok | enviando
   versaoPorYm: {},       // versao por competência (ym)
+  suprimir: 0,           // >0 durante carga/pull/migração: enfileirar é no-op
   recusadas: null,
 
   iniciar: function(){
@@ -1379,7 +1420,11 @@ const Sync = {
 
   enfileirar: function(ym, ops){
     if (!Sync.ligado || !ops || !ops.length) return;
-    Sync.fila.push({ ym: ym, ops: ops });
+    if (Sync.suprimir > 0) return;   // carga/migração/pull automático: nunca enfileira
+    var existente = null;
+    for (var i = 0; i < Sync.fila.length; i++){ if (Sync.fila[i].ym === ym){ existente = Sync.fila[i]; break; } }
+    if (existente) existente.ops = coalescerOps(existente.ops.concat(ops));
+    else Sync.fila.push({ ym: ym, ops: coalescerOps(ops) });
     Sync.guardarFila();
     Sync.agendar();
   },
@@ -1403,6 +1448,7 @@ const Sync = {
     try{
       var porMes = {};
       lote.forEach(function(it){ porMes[it.ym] = (porMes[it.ym] || []).concat(it.ops); });
+      for (var ymC in porMes) porMes[ymC] = coalescerOps(porMes[ymC]);
 
       for (var ym in porMes){
         var r = await Transport.call("apiPush", [ym, porMes[ym], Sessao.token]);
@@ -5813,6 +5859,11 @@ function reaplicarFilaPendenteLocal(ym){
 /* Aplica um estado vindo do servidor e persiste.
    Usado no pull inicial e na consulta periódica. */
 function aplicarRemoto(remoto, ym){
+  Sync.suprimir++;
+  try { return _aplicarRemoto(remoto, ym); }
+  finally { Sync.suprimir--; }
+}
+function _aplicarRemoto(remoto, ym){
   var local = null;
   try{ local = JSON.parse(localStorage.getItem("escala7gb-" + ym) || "null"); }catch(e){}
 
@@ -5996,7 +6047,9 @@ async function sincronizarMes(ym){
       // Servidor sem cadastro: envia o elenco uma vez. Sem ele a ACO por SB é
       // recusada (podeGravarGrupo consulta elencoMap). Só as seções que este
       // perfil pode gravar entram — o diff já filtra.
-      if (Sync.ligado && !(r.elenco && r.elenco.length)){
+      // Só envia elenco inicial se o mês tem dados reais (marcas); mês vazio
+      // (ex.: outubro) NÃO gera push/versão fantasma.
+      if (Sync.ligado && !(r.elenco && r.elenco.length) && Object.keys(marks || {}).length){
         try{
           const atual = estadoSalvavel();
           const semMes = Object.assign({}, atual, { mes: [] });
