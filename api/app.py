@@ -548,10 +548,10 @@ class Handler(BaseHTTPRequestHandler):
 
         desde_quando = corpo.get("desdeQuando") or corpo.get("desde_quando")
         try:
-            limite_mov = int(corpo.get("limiteMovimentos") or corpo.get("limite_movimentos") or 200)
+            limite_mov = int(corpo.get("limiteMovimentos") or corpo.get("limite_movimentos") or 100)
         except (ValueError, TypeError):
-            limite_mov = 200
-        limite_mov = max(1, min(1000, limite_mov))
+            limite_mov = 100
+        limite_mov = max(1, min(500, limite_mov))
 
         u = resolver_token(token)
         if not u:

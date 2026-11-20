@@ -5532,26 +5532,43 @@ function mudarCompetencia(v){
     if (sm) sm.value = String(D.competencia).slice(0,7);
     return;
   }
-  salvarLocal(true);
-  D.competencia = v + "-01";
-  carregarEstado();
-  desenhar();
-  status("competência: " + mesAnoBR(v));
+  var ymAtual = String(D.competencia).slice(0,7);
+  var temFilaPendente = Sync && Array.isArray(Sync.fila) && Sync.fila.some(function(it){ return it.ym === ymAtual; });
+  var jaSalvou = false;
 
-  // Ao trocar de competência, reseta os cursores para que a versão de outro mês
-  // não bloqueie ou contamine a nova competência.
-  if (typeof Sync !== "undefined") {
-    Sync.versao = null;
-    _ultimaRemota = 0;
-    if (Sync.ligado && typeof sincronizarMes === "function") {
-      sincronizarMes(v).then(function(ok){
-        if (ok) {
-          carregarEstado();
-          desenhar();
-        }
-        if (typeof agendarPoll === "function") agendarPoll(v);
-      });
+  function prosseguir(){
+    jaSalvou = true;
+    salvarLocal(true);
+    D.competencia = v + "-01";
+    carregarEstado();
+    desenhar();
+    status("competência: " + mesAnoBR(v));
+
+    // Ao trocar de competência, reseta os cursores para que a versão de outro mês
+    // não bloqueie ou contamine a nova competência.
+    if (typeof Sync !== "undefined") {
+      Sync.versao = null;
+      _ultimaRemota = 0;
+      if (Sync.ligado && typeof sincronizarMes === "function") {
+        sincronizarMes(v).then(function(ok){
+          if (ok) {
+            carregarEstado();
+            desenhar();
+          }
+          if (typeof agendarPoll === "function") agendarPoll(v);
+        });
+      }
     }
+  }
+
+  if (temFilaPendente && Sync.ligado && typeof Sync.flush === "function"){
+    Sync.flush(true).then(function(){
+      prosseguir();
+    }).catch(function(){
+      prosseguir();
+    });
+  } else {
+    prosseguir();
   }
 }
 
@@ -5744,11 +5761,48 @@ function reaplicarFilaPendenteLocal(ym){
     Sync.fila.forEach(function(item){
       if (!item || item.ym !== ym || !Array.isArray(item.ops)) return;
       item.ops.forEach(function(op){
-        if (op && op.t === "marca" && op.k){
+        if (!op) return;
+        if (op.t === "marca" && op.k){
           if (op.v === "" || op.v == null){
             delete marks[op.k];
           } else {
             marks[op.k] = op.v;
+          }
+        } else if (op.t === "comment" && op.k){
+          if (op.v === "" || op.v == null){
+            delete comments[op.k];
+          } else {
+            comments[op.k] = op.v;
+          }
+        } else if (op.t === "vis" && op.sb){
+          if (op.lista && op.lista.length){
+            vis[op.sb] = op.lista;
+          } else {
+            delete vis[op.sb];
+          }
+          if (op.linhas){
+            D.visLinhas[op.sb] = op.linhas;
+          } else {
+            delete D.visLinhas[op.sb];
+          }
+        } else if (op.t === "aco"){
+          if (op.add && op.add.length){
+            op.add.forEach(function(id){
+              if (aco.indexOf(id) < 0) aco.push(id);
+            });
+          }
+          if (op.del && op.del.length){
+            op.del.forEach(function(id){
+              var idx = aco.indexOf(id);
+              if (idx >= 0) aco.splice(idx, 1);
+            });
+          }
+        } else if (op.t === "elenco" && op.id){
+          var m = D.mes.find(function(x){ return String(x.id) === String(op.id); });
+          if (op.campos === null){
+            if (m) D.mes.splice(D.mes.indexOf(m), 1);
+          } else if (op.campos && m){
+            Object.keys(op.campos).forEach(function(c){ m[c] = op.campos[c]; });
           }
         }
       });
@@ -5832,6 +5886,8 @@ document.addEventListener("visibilitychange", function() {
 
 
 var _pullAtivoPorYm = {};
+var _ultimoPullPorYm = {};
+const PULL_DEBOUNCE_MS = 2000;
 
 async function atualizarDoServidor(ym){
   if (!Sync.ligado || document.hidden) return;
@@ -5839,7 +5895,12 @@ async function atualizarDoServidor(ym){
   if (Sync.fila.length) return;
   if (Date.now() - _ultimaInteracao < 1000) return; // Reduzido de 3s para 1s
 
+  // Debounce: se pull recente (< 2s) para mesma competência, retorna promise existente
+  var agora = Date.now();
   if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+  if (_ultimoPullPorYm[ym] && (agora - _ultimoPullPorYm[ym]) < PULL_DEBOUNCE_MS) {
+    return Promise.resolve(false);
+  }
 
   var promessa = (async function(){
     try {
@@ -5872,6 +5933,7 @@ async function atualizarDoServidor(ym){
       console.log("[sync] atualizado por outro usuário · versao", r.versao);
     } finally {
       delete _pullAtivoPorYm[ym];
+      _ultimoPullPorYm[ym] = Date.now();
     }
   })();
 
@@ -5898,7 +5960,12 @@ async function sincronizarMes(ym){
   if (!Transport.disponivel() || !Sessao.token) return false;
   if (Sync.estado === "enviando") return false;
 
+  // Debounce: se pull recente (< 2s) para mesma competência, retorna promise existente
+  var agora = Date.now();
   if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+  if (_ultimoPullPorYm[ym] && (agora - _ultimoPullPorYm[ym]) < PULL_DEBOUNCE_MS) {
+    return Promise.resolve(false);
+  }
 
   var promessa = (async function(){
     try {
@@ -5944,6 +6011,7 @@ async function sincronizarMes(ym){
       return true;
     } finally {
       delete _pullAtivoPorYm[ym];
+      _ultimoPullPorYm[ym] = Date.now();
     }
   })();
 

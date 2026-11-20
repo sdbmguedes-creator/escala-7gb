@@ -75,11 +75,19 @@ def sb_select(path, filters=None, order=None, limit=None):
     - limit=None       → pagina até esgotar (retorna tudo)
     - limit <= 1000    → single request (comportamento antigo)
     - limit > 1000     → pagina em lotes de 1000 até atingir `limit`
+
+    Operadores PostgREST suportados nos valores de `filters`:
+    gt., gte., lt., lte., like., ilike., in., is., not.
+    (não prefixar "eq." quando o valor já começa com operador).
     """
     base_params = {}
     if filters:
         for k, v in filters.items():
-            base_params[k] = f"eq.{v}"
+            s = str(v)
+            if s.startswith(("gt.", "gte.", "lt.", "lte.", "like.", "ilike.", "in.", "is.", "not.")):
+                base_params[k] = s
+            else:
+                base_params[k] = f"eq.{v}"
     if order:
         base_params["order"] = order
 

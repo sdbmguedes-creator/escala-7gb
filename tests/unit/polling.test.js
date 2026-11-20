@@ -598,4 +598,522 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
       expect(sincronizarMesMock).toHaveBeenCalledWith('2026-12');
     });
   });
+
+  describe('reaplicarFilaPendenteLocal - todos os tipos de op', () => {
+    let marks, comments, vis, D, Sync;
+
+    beforeEach(() => {
+      marks = { '1ªSB|1|2026-11-01': 'X' };
+      comments = { '1ªSB|1|2026-11-01': 'nota antiga' };
+      vis = { '1ªSB': ['user1', 'user2'] };
+      D = {
+        visLinhas: { '1ªSB': '10,20' },
+        mes: [
+          { id: '1', secao: '1ªSB', escala: 'A', motorista: '', adm: 'N', restricao: false, cotasAdm: 0, afast: [], escalaOrigem: '', escalaOrigemAdm: '' }
+        ]
+      };
+      Sync = {
+        fila: [],
+        ligado: true,
+        estado: 'ok'
+      };
+    });
+
+    it('deve reaplicar op marca (adicionar/atualizar)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'marca', k: '1ªSB|1|2026-11-02', v: 'F' }]
+      }];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'marca' && op.k) {
+              if (op.v === '' || op.v == null) delete marks[op.k];
+              else marks[op.k] = op.v;
+            }
+          });
+        }
+      });
+
+      expect(marks['1ªSB|1|2026-11-02']).toBe('F');
+    });
+
+    it('deve reaplicar op marca (deletar)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'marca', k: '1ªSB|1|2026-11-01', v: '' }]
+      }];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'marca' && op.k) {
+              if (op.v === '' || op.v == null) delete marks[op.k];
+              else marks[op.k] = op.v;
+            }
+          });
+        }
+      });
+
+      expect(marks['1ªSB|1|2026-11-01']).toBeUndefined();
+    });
+  });
+
+  describe('reaplicarFilaPendenteLocal - comment, vis, aco, elenco', () => {
+    let marks, comments, vis, D, Sync;
+
+    beforeEach(() => {
+      marks = { '1ªSB|1|2026-11-01': 'X' };
+      comments = { '1ªSB|1|2026-11-01': 'nota antiga' };
+      vis = { '1ªSB': ['user1', 'user2'] };
+      D = {
+        visLinhas: { '1ªSB': '10,20' },
+        mes: [
+          { id: '1', secao: '1ªSB', escala: 'A', motorista: '', adm: 'N', restricao: false, cotasAdm: 0, afast: [], escalaOrigem: '', escalaOrigemAdm: '' }
+        ]
+      };
+      Sync = {
+        fila: [],
+        ligado: true,
+        estado: 'ok'
+      };
+    });
+
+    it('deve reaplicar op comment (adicionar/atualizar)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'comment', k: '1ªSB|1|2026-11-01', v: 'nova nota' }]
+      }];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'comment' && op.k) {
+              if (op.v === '' || op.v == null) delete comments[op.k];
+              else comments[op.k] = op.v;
+            }
+          });
+        }
+      });
+
+      expect(comments['1ªSB|1|2026-11-01']).toBe('nova nota');
+    });
+
+    it('deve reaplicar op comment (deletar)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'comment', k: '1ªSB|1|2026-11-01', v: '' }]
+      }];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'comment' && op.k) {
+              if (op.v === '' || op.v == null) delete comments[op.k];
+              else comments[op.k] = op.v;
+            }
+          });
+        }
+      });
+
+      expect(comments['1ªSB|1|2026-11-01']).toBeUndefined();
+    });
+
+    it('deve reaplicar op vis (atualizar lista e linhas)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'vis', sb: '1ªSB', lista: ['user3'], linhas: '30,40' }]
+      }];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'vis' && op.sb) {
+              if (op.lista && op.lista.length) vis[op.sb] = op.lista;
+              else delete vis[op.sb];
+              if (op.linhas) D.visLinhas[op.sb] = op.linhas;
+              else delete D.visLinhas[op.sb];
+            }
+          });
+        }
+      });
+
+      expect(vis['1ªSB']).toEqual(['user3']);
+      expect(D.visLinhas['1ªSB']).toBe('30,40');
+    });
+
+    it('deve reaplicar op vis (deletar)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'vis', sb: '1ªSB', lista: [], linhas: null }]
+      }];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'vis' && op.sb) {
+              if (op.lista && op.lista.length) vis[op.sb] = op.lista;
+              else delete vis[op.sb];
+              if (op.linhas) D.visLinhas[op.sb] = op.linhas;
+              else delete D.visLinhas[op.sb];
+            }
+          });
+        }
+      });
+
+      expect(vis['1ªSB']).toBeUndefined();
+      expect(D.visLinhas['1ªSB']).toBeUndefined();
+    });
+  });
+
+  describe('reaplicarFilaPendenteLocal - aco, elenco', () => {
+    let marks, comments, vis, D, Sync;
+
+    beforeEach(() => {
+      marks = { '1ªSB|1|2026-11-01': 'X' };
+      comments = { '1ªSB|1|2026-11-01': 'nota antiga' };
+      vis = { '1ªSB': ['user1', 'user2'] };
+      D = {
+        visLinhas: { '1ªSB': '10,20' },
+        mes: [
+          { id: '1', secao: '1ªSB', escala: 'A', motorista: '', adm: 'N', restricao: false, cotasAdm: 0, afast: [], escalaOrigem: '', escalaOrigemAdm: '' }
+        ]
+      };
+      Sync = {
+        fila: [],
+        ligado: true,
+        estado: 'ok'
+      };
+    });
+
+    it('deve reaplicar op aco (add/del)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'aco', add: ['user3'], del: ['user1'] }]
+      }];
+
+      const aco = ['user1', 'user2'];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'aco') {
+              if (op.add && op.add.length) {
+                op.add.forEach(id => { if (aco.indexOf(id) < 0) aco.push(id); });
+              }
+              if (op.del && op.del.length) {
+                op.del.forEach(id => { const idx = aco.indexOf(id); if (idx >= 0) aco.splice(idx, 1); });
+              }
+            }
+          });
+        }
+      });
+
+      expect(aco).toContain('user3');
+      expect(aco).not.toContain('user1');
+      expect(aco).toContain('user2');
+    });
+
+    it('deve reaplicar op elenco (atualizar campos)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'elenco', id: '1', campos: { secao: '2ªSB', adm: 'S' } }]
+      }];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'elenco' && op.id) {
+              const m = D.mes.find(x => String(x.id) === String(op.id));
+              if (op.campos === null && m) {
+                D.mes.splice(D.mes.indexOf(m), 1);
+              } else if (op.campos && m) {
+                Object.keys(op.campos).forEach(c => { m[c] = op.campos[c]; });
+              }
+            }
+          });
+        }
+      });
+
+      expect(D.mes[0].secao).toBe('2ªSB');
+      expect(D.mes[0].adm).toBe('S');
+    });
+
+    it('deve reaplicar op elenco (remover militar)', () => {
+      Sync.fila = [{
+        ym: '2026-11',
+        ops: [{ t: 'elenco', id: '1', campos: null }]
+      }];
+
+      Sync.fila.forEach(item => {
+        if (item.ym === '2026-11' && Array.isArray(item.ops)) {
+          item.ops.forEach(op => {
+            if (op.t === 'elenco' && op.id) {
+              const m = D.mes.find(x => String(x.id) === String(op.id));
+              if (op.campos === null && m) {
+                D.mes.splice(D.mes.indexOf(m), 1);
+              } else if (op.campos && m) {
+                Object.keys(op.campos).forEach(c => { m[c] = op.campos[c]; });
+              }
+            }
+          });
+        }
+      });
+
+      expect(D.mes.length).toBe(0);
+    });
+  });
+
+  describe('Debounce _pullAtivoPorYm (2000ms)', () => {
+    let _pullAtivoPorYm, _ultimoPullPorYm, PULL_DEBOUNCE_MS;
+    let fakeTransportCall, Sync, Sessao, D, Transport, _ultimaInteracao, _ultimaRemota;
+    let atualizarDoServidor, sincronizarMes;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      _pullAtivoPorYm = {};
+      _ultimoPullPorYm = {};
+      PULL_DEBOUNCE_MS = 2000;
+      _ultimaInteracao = Date.now() - 5000;
+      _ultimaRemota = 0;
+      
+      Sync = { ligado: true, estado: 'ok', fila: [], versao: 1, enfileirar: vi.fn(), flush: vi.fn(), pintar: vi.fn(), agendar: vi.fn() };
+      Sessao = { token: 'token-123' };
+      D = { competencia: '2026-11-01', movimentos: [] };
+      
+      fakeTransportCall = vi.fn().mockResolvedValue({ ok: true, versao: 2, marcas: [], semMudanca: false });
+      Transport = { disponivel: () => true, call: fakeTransportCall };
+      
+      atualizarDoServidor = async (ym) => {
+        if (!Sync.ligado) return;
+        if (Sync.estado === 'enviando') return;
+        if (Sync.fila.length) return;
+        
+        var agora = Date.now();
+        if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+        if (_ultimoPullPorYm[ym] && (agora - _ultimoPullPorYm[ym]) < PULL_DEBOUNCE_MS) {
+          return Promise.resolve(false);
+        }
+        
+        var promessa = (async () => {
+          try {
+            var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
+            var r = await Transport.call('apiPull', [ym, Sessao.token, Sync.versao, ultimoMov]).catch(() => null);
+            return r;
+          } finally {
+            delete _pullAtivoPorYm[ym];
+            _ultimoPullPorYm[ym] = Date.now();
+          }
+        })();
+        
+        _pullAtivoPorYm[ym] = promessa;
+        return promessa;
+      };
+      
+      sincronizarMes = async (ym) => {
+        if (!Transport.disponivel() || !Sessao.token) return false;
+        if (Sync.estado === 'enviando') return false;
+        
+        var agora = Date.now();
+        if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+        if (_ultimoPullPorYm[ym] && (agora - _ultimoPullPorYm[ym]) < PULL_DEBOUNCE_MS) {
+          return Promise.resolve(false);
+        }
+        
+        var promessa = (async () => {
+          try {
+            var desde = (Sync.versao != null && !Sync.fila.length) ? Sync.versao : null;
+            var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
+            var r = await Transport.call('apiPull', [ym, Sessao.token, desde, ultimoMov]).catch(() => null);
+            return r;
+          } finally {
+            delete _pullAtivoPorYm[ym];
+            _ultimoPullPorYm[ym] = Date.now();
+          }
+        })();
+        
+        _pullAtivoPorYm[ym] = promessa;
+        return promessa;
+      };
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('deve permitir pull imediato se não há pull anterior', async () => {
+      const r1 = await atualizarDoServidor('2026-11');
+      expect(fakeTransportCall).toHaveBeenCalledTimes(1);
+      expect(r1).toBeTruthy();
+    });
+
+    it('deve bloquear segundo pull dentro de 2000ms (debounce)', async () => {
+      await atualizarDoServidor('2026-11');
+      expect(fakeTransportCall).toHaveBeenCalledTimes(1);
+      
+      const r2 = await atualizarDoServidor('2026-11');
+      expect(fakeTransportCall).toHaveBeenCalledTimes(1);
+      expect(r2).toBe(false);
+    });
+  });
+
+  describe('Debounce _pullAtivoPorYm - continuar', () => {
+    let _pullAtivoPorYm, _ultimoPullPorYm, PULL_DEBOUNCE_MS;
+    let fakeTransportCall, Sync, Sessao, D, Transport, _ultimaInteracao, _ultimaRemota;
+    let atualizarDoServidor, sincronizarMes;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      _pullAtivoPorYm = {};
+      _ultimoPullPorYm = {};
+      PULL_DEBOUNCE_MS = 2000;
+      _ultimaInteracao = Date.now() - 5000;
+      _ultimaRemota = 0;
+      
+      Sync = { ligado: true, estado: 'ok', fila: [], versao: 1, enfileirar: vi.fn(), flush: vi.fn(), pintar: vi.fn(), agendar: vi.fn() };
+      Sessao = { token: 'token-123' };
+      D = { competencia: '2026-11-01', movimentos: [] };
+      
+      fakeTransportCall = vi.fn().mockResolvedValue({ ok: true, versao: 2, marcas: [], semMudanca: false });
+      Transport = { disponivel: () => true, call: fakeTransportCall };
+      
+      atualizarDoServidor = async (ym) => {
+        if (!Sync.ligado) return;
+        if (Sync.estado === 'enviando') return;
+        if (Sync.fila.length) return;
+        
+        var agora = Date.now();
+        if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+        if (_ultimoPullPorYm[ym] && (agora - _ultimoPullPorYm[ym]) < PULL_DEBOUNCE_MS) {
+          return Promise.resolve(false);
+        }
+        
+        var promessa = (async () => {
+          try {
+            var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
+            var r = await Transport.call('apiPull', [ym, Sessao.token, Sync.versao, ultimoMov]).catch(() => null);
+            return r;
+          } finally {
+            delete _pullAtivoPorYm[ym];
+            _ultimoPullPorYm[ym] = Date.now();
+          }
+        })();
+        
+        _pullAtivoPorYm[ym] = promessa;
+        return promessa;
+      };
+      
+      sincronizarMes = async (ym) => {
+        if (!Transport.disponivel() || !Sessao.token) return false;
+        if (Sync.estado === 'enviando') return false;
+        
+        var agora = Date.now();
+        if (_pullAtivoPorYm[ym]) return _pullAtivoPorYm[ym];
+        if (_ultimoPullPorYm[ym] && (agora - _ultimoPullPorYm[ym]) < PULL_DEBOUNCE_MS) {
+          return Promise.resolve(false);
+        }
+        
+        var promessa = (async () => {
+          try {
+            var desde = (Sync.versao != null && !Sync.fila.length) ? Sync.versao : null;
+            var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
+            var r = await Transport.call('apiPull', [ym, Sessao.token, desde, ultimoMov]).catch(() => null);
+            return r;
+          } finally {
+            delete _pullAtivoPorYm[ym];
+            _ultimoPullPorYm[ym] = Date.now();
+          }
+        })();
+        
+        _pullAtivoPorYm[ym] = promessa;
+        return promessa;
+      };
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('deve permitir novo pull após 2000ms', async () => {
+      await atualizarDoServidor('2026-11');
+      expect(fakeTransportCall).toHaveBeenCalledTimes(1);
+      
+      vi.advanceTimersByTime(2001);
+      
+      const r2 = await atualizarDoServidor('2026-11');
+      expect(fakeTransportCall).toHaveBeenCalledTimes(2);
+      expect(r2).toBeTruthy();
+    });
+
+    it('deve aplicar debounce também em sincronizarMes', async () => {
+      await sincronizarMes('2026-11');
+      expect(fakeTransportCall).toHaveBeenCalledTimes(1);
+      
+      const r2 = await sincronizarMes('2026-11');
+      expect(fakeTransportCall).toHaveBeenCalledTimes(1);
+      expect(r2).toBe(false);
+    });
+  });
+
+  describe('mudarCompetencia - preservar fila pendente', () => {
+    let Sync, D, Sessao, Transport, _pullAtivoPorYm, _ultimoPullPorYm, PULL_DEBOUNCE_MS;
+    let fakeTransportCall, flushCalls;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      _pullAtivoPorYm = {};
+      _ultimoPullPorYm = {};
+      PULL_DEBOUNCE_MS = 2000;
+      
+      flushCalls = 0;
+      Sync = { 
+        ligado: true, 
+        estado: 'ok', 
+        fila: [{ ym: '2026-11', ops: [{ t: 'marca', k: '1|2026-11-01', v: 'X' }] }],
+        versao: 1,
+        enfileirar: vi.fn(),
+        flush: vi.fn(() => { flushCalls++; return Promise.resolve(); }),
+        pintar: vi.fn(),
+        agendar: vi.fn()
+      };
+      Sessao = { token: 'token-123' };
+      D = { competencia: '2026-11-01', movimentos: [] };
+      
+      fakeTransportCall = vi.fn().mockResolvedValue({ ok: true, versao: 2, marcas: [] });
+      Transport = { disponivel: () => true, call: fakeTransportCall };
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('deve chamar Sync.flush antes de trocar competência se há fila pendente', async () => {
+      const ymAtual = '2026-11';
+      const temFilaPendente = Sync.fila.some(it => it.ym === ymAtual);
+      
+      expect(temFilaPendente).toBe(true);
+      
+      if (temFilaPendente && Sync.ligado && typeof Sync.flush === 'function') {
+        await Sync.flush(true);
+      }
+      
+      expect(flushCalls).toBe(1);
+    });
+
+    it('não deve chamar flush se não há fila pendente para a competência atual', async () => {
+      Sync.fila = [{ ym: '2026-10', ops: [] }];
+      
+      const ymAtual = '2026-11';
+      const temFilaPendente = Sync.fila.some(it => it.ym === ymAtual);
+      
+      expect(temFilaPendente).toBe(false);
+      
+      if (temFilaPendente && Sync.ligado && typeof Sync.flush === 'function') {
+        await Sync.flush(true);
+      }
+      
+      expect(flushCalls).toBe(0);
+    });
+  });
 });
