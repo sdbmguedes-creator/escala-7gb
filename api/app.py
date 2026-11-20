@@ -656,12 +656,14 @@ class Handler(BaseHTTPRequestHandler):
                     k = op.get("k", "")
                     p = str(k).split("|")
                     dia_int = None
-                    if len(p) >= 3:
+                    if len(p) >= 3 and p[2] not in (None, ""):
+                        raw_dia = str(p[2]).strip()
+                        if "-" in raw_dia:
+                            raw_dia = raw_dia.split("-")[-1]
                         try:
-                            dia_int = int(p[2])
+                            dia_int = int(raw_dia)
                         except (ValueError, TypeError):
                             dia_int = None
-
                     if len(p) < 3:
                         motivo = "chave de marca inválida"
                     elif dia_int is None:
