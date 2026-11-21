@@ -164,3 +164,36 @@ def test_pull_normaliza_adm_e_trata_excecao(monkeypatch):
     assert respostas and respostas[0][1] == 500
     assert respostas[0][0]["ok"] is False
     assert "falha rede" in respostas[0][0]["erro"]
+
+
+def _rodar_get(path):
+    import io
+    import app as api_app
+
+    status_box = []
+    headers = {}
+    wfile = io.BytesIO()
+
+    h = object.__new__(api_app.Handler)
+    h.path = path
+    h.wfile = wfile
+    h.send_response = lambda code: status_box.append(code)
+    h.send_header = lambda k, v: headers.__setitem__(k.lower(), v)
+    h.end_headers = lambda: None
+    h.do_GET()
+    return status_box[0], headers, wfile.getvalue().decode("utf-8")
+
+
+def test_get_sync_js_retorna_javascript_nao_html():
+    status, headers, body = _rodar_get("/sync.js")
+    assert status == 200
+    assert headers.get("content-type", "").startswith("application/javascript")
+    assert not body.lstrip().startswith("<")
+    assert "var Transport" in body and "const Sync" in body
+
+
+def test_get_raiz_retorna_html():
+    status, headers, body = _rodar_get("/")
+    assert status == 200
+    assert headers.get("content-type", "").startswith("text/html")
+    assert '<script src="sync.js"></script>' in body

@@ -108,7 +108,7 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         
         # Se a requisição for para um arquivo estático do PWA, serve ele diretamente
-        if path in ("/manifest.json", "/sw.js") or path.startswith("/icon-"):
+        if path in ("/manifest.json", "/sw.js", "/sync.js") or path.startswith("/icon-"):
             self._serve_estatico(path.lstrip("/"))
             return
             
