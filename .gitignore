@@ -32,6 +32,8 @@ cypress/downloads/
 _snapshot/
 backups*/
 backups2026_11/
+backup_migracao_2026_11/
+CONTEXTO_SYNC_2026_11.md
 trecho_*.txt
 escala-*-OK_SYNC.json
 index_v14_OLD.html
@@ -43,3 +45,4 @@ index_v14_OLD.html
 .idea/
 .DS_Store
 Thumbs.db
+.env*
