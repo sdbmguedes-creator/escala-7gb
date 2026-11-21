@@ -1,7 +1,8 @@
 /* eslint-disable no-unused-vars */
 /* global ehMestre, perfilAtual, marks, comments, vis, aco, statusMes, autoX,
+   competenciaFechada, fechadaPor, fechadaEm,
    reconstruirIndiceMarcas, estadoSalvavel, gravarMes, esc, location,
-   AbortController, alert, navigator, carregarEstado */
+   AbortController, alert, navigator, carregarEstado, toast */
 /* Motor de Sincronização (extraído de frontend/index_v14.html) */
 
 /* @@sync-helpers-begin */
@@ -22,6 +23,7 @@ function coalescerOps(ops){
     else if (op.t === "vis") chave = "vis|" + op.sb;
     else if (op.t === "oficial") chave = "oficial|" + op.dia + "|" + op.turno;
     else if (op.t === "meta") chave = "meta";
+    else if (op.t === "fechamento") chave = "fechamento";
     if (chave === null){ saida.push(op); return; }
     if (chave in idx){
       var ant = saida[idx[chave]];
@@ -190,6 +192,27 @@ const Sync = {
                   "  Sync.estado='ok'; Sync.flush()  // tenta de novo após o adm aumentar o limite");
           } catch(e){}
           return;   // aborta este flush (não processa próximos meses)
+        }
+
+        if (r && r.fechada){
+          console.warn("[sync] competência fechada (", ym, "):", r.erro);
+          Sync.fila = Sync.fila.filter(function(it){ return it.ym !== ym; });
+          Sync.guardarFila();
+          Sync.estado = "ok";
+          if (typeof D !== "undefined" && String(D.competencia || "").slice(0, 7) === ym){
+            competenciaFechada = true;
+          }
+          Sync.pintar();
+          if (typeof toast === "function") toast("Competência fechada: somente leitura", "erro", 4000);
+          if (typeof sincronizarMes === "function"){
+            sincronizarMes(ym).then(function(ok){
+              if (ok){
+                if (typeof carregarEstado === "function") carregarEstado();
+                if (typeof desenhar === "function") desenhar();
+              }
+            }).catch(function(){});
+          }
+          return;
         }
 
         if (!r || !r.ok) throw new Error((r && r.erro) || "push falhou");
@@ -516,7 +539,8 @@ var ROTAS_API = {
   apiListarUsuarios:   { path: "/api/listar_usuarios",  args: ["token"] },
   apiRevogarUsuario:   { path: "/api/revogar_usuario",  args: ["token", "nome"] },
   apiEncerrarSessoes:  { path: "/api/encerrar_sessoes", args: ["token", "nome"] },
-  apiRedefinirPin:     { path: "/api/redefinir_pin",    args: ["token", "nome", "pin"] }
+  apiRedefinirPin:     { path: "/api/redefinir_pin",    args: ["token", "nome", "pin"] },
+  apiGetLogs:          { path: "/api/logs",             args: ["token", "competencia"] }
 };
 
 var Transport = {
@@ -582,9 +606,23 @@ var Sessao = {
    Traz o estado do servidor para o cliente. O servidor passa a ser a fonte
    das marcas; o cadastro (elenco) continua local por enquanto.
    ========================================================================== */
+/* O servidor guarda só o número do dia; a chave local é AAAA-MM-DD.
+   Sem normalizar, 'grupo|id|5' nunca casa com 'grupo|id|2026-11-05' e as
+   marcas somem após o pull (logoff/login/F5). */
+function diaMarcaISO(ym, d){
+  var raw = String(d == null ? "" : d).trim();
+  return /^\d+$/.test(raw) ? (String(ym).slice(0, 7) + "-" + ("0" + parseInt(raw, 10)).slice(-2)) : raw;
+}
+
 function estadoDoServidor(p){
   var mk = {}, cm = {};
-  (p.marcas || []).forEach(function(m){ mk[m.g + "|" + m.i + "|" + m.d] = m.c; });
+  var ymP = (p.meta && p.meta.competencia) || (typeof D !== "undefined" && D.competencia) || "";
+  var curtas = [];
+  (p.marcas || []).forEach(function(m){
+    var iso = diaMarcaISO(ymP, m.d), k = m.g + "|" + m.i + "|" + iso;
+    if (iso !== String(m.d)) curtas.push([k, m.c]); else mk[k] = m.c;
+  });
+  curtas.forEach(function(x){ if (!(x[0] in mk)) mk[x[0]] = x[1]; });
   (p.comments || []).forEach(function(c){ cm[c.k] = c.v; });
   return {
     marks: mk,
@@ -596,7 +634,10 @@ function estadoDoServidor(p){
     // ...
     vis: (p.meta && p.meta.vis) || {},
     visLinhas: (p.meta && p.meta.visLinhas) || {},
-    aco: (p.meta && p.meta.aco) || []
+    aco: (p.meta && p.meta.aco) || [],
+    fechada: !!(p.meta && p.meta.fechada),
+    fechadaPor: (p.meta && p.meta.fechadaPor) || "",
+    fechadaEm: (p.meta && p.meta.fechadaEm) || ""
   };
 }
 
@@ -685,6 +726,9 @@ function _aplicarRemoto(remoto, ym){
   if (remoto.visLinhas && Object.keys(remoto.visLinhas).length) D.visLinhas = remoto.visLinhas;
   if (remoto.aco && remoto.aco.length) aco = remoto.aco;
   if (remoto.statusMes) statusMes = remoto.statusMes;
+  competenciaFechada = !!remoto.fechada;
+  fechadaPor = remoto.fechadaPor || "";
+  fechadaEm = remoto.fechadaEm || "";
   
   // NOVO: Sincroniza o cadastro (D.mes) com os dados do servidor
   if (remoto.elenco && remoto.elenco.length) {

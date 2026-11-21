@@ -258,12 +258,15 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
     <button onclick="exportarCSV()" title="Baixar planilha do Excel">Exportar CSV</button>
     <label id="impLabel">Backup JSON<input type="file" id="imp" accept=".json" style="display:none" onchange="importar(this)"></label>
     <button onclick="window.print()" title="Imprimir ou Salvar como PDF">Imprimir / PDF</button>
+    <button id="btnHistoricoComp" style="display:none" onclick="abrirHistoricoCompetencia()" title="Histórico de alterações da competência">🕘</button>
+    <button id="btnFecharComp" style="display:none" onclick="alternarFechamentoCompetencia()" title="Fechar ou reabrir competência (Admin)"></button>
     <button id="btnSair" style="display:none" onclick="sair()" title="Encerrar a sessão neste navegador">Sair</button>
   </span>
   <span id="status" style="color:#fff;font-size:12px;opacity:.9;margin-left:10px"></span>
   <span id="syncStatus" aria-live="polite" style="font-size:11.5px;font-weight:600;margin-left:8px"></span>
 </header>
 <nav id="nav"></nav>
+<div id="bannerFechada" style="display:none;background:#fff3cd;color:#664d03;border-bottom:1px solid #ffecb5;padding:6px 14px;font-size:12.5px;font-weight:600;text-align:center"></div>
 <main id="main"></main>
 <div id="menu"></div>
 <div id="toast" aria-live="polite"></div>
@@ -528,6 +531,9 @@ let comments = D.comments || {};
 let afastMesclado = false;
 let autoX = false;
 let statusMes = "ativa";
+let competenciaFechada = false;
+let fechadaPor = "";
+let fechadaEm = "";
 D.snapshot = D.snapshot || null;
 D.movimentos = D.movimentos || [];
 
@@ -1046,15 +1052,18 @@ function avisosLegadoDados(){
    (por exemplo, dentro do carregamento inicial, lendo o e-mail logado).
    Nenhuma outra parte desta logica deve ser reescrita.
    ========================================================================== */
+function ehFechada(){ return !!competenciaFechada; }
 function ehMestre(){ return perfilAtual === "Mestre" || perfilAtual === "Admin"; }
 function podeEditarAco(id){
+  if (ehFechada()) return false;
   if (ehMestre()) return true;
   const m = D.mes.find(x=>x.id===id);
   if (!m) return false;
   return m.secao === perfilAtual;
 }
-function podeEditarSB(sb){ return ehMestre() || String(perfilAtual) === String(sb); }
+function podeEditarSB(sb){ return !ehFechada() && (ehMestre() || String(perfilAtual) === String(sb)); }
 function podeEditarConfMilitar(id){
+  if (ehFechada()) return false;
   if (ehMestre()) return true;
   const m = D.mes.find(function(x){ return x.id === id; });
   if (!m) return false;
@@ -1205,11 +1214,31 @@ function desenhar(){
   if (selMes){ selMes.value = String(D.competencia).slice(0,7); selMes.disabled = !ehMestre(); }
   const impLabel = document.getElementById("impLabel");
   if (impLabel) impLabel.style.display = ehMestre() ? "inline-flex" : "none";
+  const isAdmMestre = (perfilAtual === "Admin" || perfilAtual === "Mestre");
+  const btnHist = document.getElementById("btnHistoricoComp");
+  if (btnHist) btnHist.style.display = (isAdmMestre && Transport.disponivel()) ? "" : "none";
+  const btnFechar = document.getElementById("btnFecharComp");
+  if (btnFechar){
+    btnFechar.style.display = (perfilAtual === "Admin" && Transport.disponivel()) ? "" : "none";
+    btnFechar.textContent = ehFechada() ? "🔓 Reabrir" : "🔒 Fechar";
+    btnFechar.title = ehFechada() ? "Reabrir competência para edição (Admin)" : "Fechar competência (somente leitura)";
+  }
+  const banner = document.getElementById("bannerFechada");
+  if (banner){
+    if (ehFechada()){
+      let info = "🔒 Competência fechada — modo somente leitura";
+      if (fechadaPor) info += " (fechada por " + fechadaPor + ")";
+      banner.textContent = info;
+      banner.style.display = "block";
+    } else {
+      banner.style.display = "none";
+      banner.textContent = "";
+    }
+  }
   const nav = document.getElementById("nav");
   const _navScroll = nav.scrollLeft;
   nav.innerHTML = "";
       let abasNav = [...SBS,"ACO","CONF. INDIV.","CONFERÊNCIA"];
-  const isAdmMestre = (perfilAtual === "Admin" || perfilAtual === "Mestre");
   
   if (isAdmMestre) {
     abasNav.push("DIARIO", "OPERACIONAL", "MILITARES", "AFASTAMENTOS");
@@ -1731,8 +1760,8 @@ function revelarUltimaLinhaVisitante(sb){
 function celulaMarca(td, grupo, id, dia, escala, recalc, exato){
   if (id) td.dataset.cmtKey = grupo + "|" + id + "|" + dia;
   const mm = id ? D.mes.find(x=>x.id===id) : null;
-  let permitido = ehMestre();
-  if (!permitido){
+  let permitido = !ehFechada() && ehMestre();
+  if (!permitido && !ehFechada()){
     if (String(grupo).indexOf("host:") === 0) permitido = String(grupo).slice(5) === perfilAtual;
     else if (String(grupo).indexOf("ADM:") === 0) permitido = String(grupo).slice(4) === perfilAtual;
     else permitido = String(grupo) === perfilAtual;
@@ -1794,6 +1823,7 @@ function celulaMarca(td, grupo, id, dia, escala, recalc, exato){
 // Indicador: triângulo no canto superior direito (classe temComentario).
 // Tooltip: título da célula mostra "💬 texto" (appended em desenharGrade2).
 function podeComentarGrupo(grupo){
+  if (ehFechada()) return false;
   if (ehMestre()) return true;
   const g = String(grupo||"");
   if (g.indexOf("host:")===0) return g.slice(5) === perfilAtual;
@@ -1861,6 +1891,11 @@ document.addEventListener("contextmenu", function(e){
   if (!td) return;
   const partes = String(td.dataset.cmtKey||"").split("|");
   if (partes.length < 3) return;
+  if (ehFechada()){
+    e.preventDefault();
+    toast("Competência fechada: somente leitura", "erro");
+    return;
+  }
   if (!podeComentarGrupo(partes[0])){
     e.preventDefault();
     alert("Perfil "+perfilAtual+": você só edita comentários da própria SB.");
@@ -4179,6 +4214,10 @@ function desenharMovimentacoes(main){
 
 // ===== 10. AÇÕES (marcar, trocarMilitar, ajustarEscala, ...) =====
 function marcar(grupo,id,dia,cod){
+  if (ehFechada()){
+    alert("Competência fechada: somente leitura.");
+    return false;
+  }
   if (ehPreparacao() && !abaLiberada(String(grupo).replace(/^host:/,""))){
     alert("Mês em preparação – lançamentos liberados após 'Ativar escala'.");
     return false;
@@ -4579,7 +4618,18 @@ function sair(){
   if (!Transport.disponivel()) return;
   if (!Sessao.token){ Sessao.limpar(); location.reload(); return; }
   if (!confirm("Sair da sessão neste navegador?")) return;
-  Transport.call("apiLogout", [Sessao.token])
+  // Antes de invalidar o token, envia o que ainda está na fila (o push é
+  // adiado 1,5 s): sem isto as marcas recentes eram descartadas no logoff.
+  var drenar = Promise.resolve();
+  if (Sync.ligado){
+    if (Sync.timer){ clearTimeout(Sync.timer); Sync.timer = null; }
+    drenar = Promise.resolve(Sync._flushEmAndamento)
+      .catch(function(){})
+      .then(function(){ return Sync.fila.length ? Sync.flush(true) : null; });
+  }
+  var limite = new Promise(function(res){ setTimeout(res, 8000); });
+  Promise.race([drenar.catch(function(){}), limite])
+    .then(function(){ return Transport.call("apiLogout", [Sessao.token]); })
     .catch(function(){ /* mesmo se falhar, limpa o local */ })
     .then(function(){
       Sessao.limpar();
@@ -4590,6 +4640,120 @@ function sair(){
 function atualizarBotaoSair(){
   var b = document.getElementById("btnSair");
   if (b) b.style.display = (Transport.disponivel() && Sessao.token) ? "" : "none";
+}
+
+function alternarFechamentoCompetencia(){
+  if (perfilAtual !== "Admin"){
+    alert("Apenas o perfil Admin pode fechar ou reabrir uma competência.");
+    return;
+  }
+  var ym = String(D.competencia || "").slice(0, 7);
+  var fechar = !ehFechada();
+  var msg = fechar
+    ? "Fechar a competência " + ym + "? Nenhuma alteração na grade será permitida até reabrir."
+    : "Reabrir a competência " + ym + " para edição?";
+  if (!confirm(msg)) return;
+  Transport.call("apiPush", [ym, [{ t: "fechamento", fechada: fechar }], Sessao.token]).then(function(r){
+    if (!r || !r.ok){
+      alert("Erro ao atualizar competência: " + ((r && r.erro) || "falha no servidor"));
+      return;
+    }
+    competenciaFechada = fechar;
+    fechadaPor = Sessao.nome || "";
+    fechadaEm = new Date().toISOString();
+    if (r.versao != null && typeof Sync !== "undefined" && Sync.versaoPorYm){
+      Sync.versaoPorYm[ym] = r.versao;
+    }
+    salvarLocal(true);
+    desenhar();
+    toast(fechar ? "Competência fechada" : "Competência reaberta");
+  }).catch(function(e){
+    alert("Erro ao atualizar competência: " + (e && e.message || e));
+  });
+}
+
+function renderizarModalHistorico(logs, ym){
+  var antigo = document.getElementById("histOverlay");
+  if (antigo) antigo.remove();
+  var ov = document.createElement("div");
+  ov.id = "histOverlay";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:8px;max-width:860px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.25)";
+  var cab = document.createElement("div");
+  cab.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #dee2e6";
+  cab.innerHTML = "<strong style='color:#1f3b5c;font-size:14px'>Histórico de Auditoria — " + esc(ym) + "</strong>"
+    + "<button id='btnFecharHist' style='border:1px solid #ced4da;background:#f8f9fa;border-radius:4px;padding:3px 10px;cursor:pointer'>Fechar</button>";
+  var body = document.createElement("div");
+  body.style.cssText = "padding:12px 16px;overflow:auto;font-size:12px";
+
+  var lista = (logs || []).filter(function(l){
+    return l && (l.acao === "edicao" || l.acao === "fechar_competencia" || l.acao === "reabrir_competencia");
+  });
+  if (!lista.length){
+    body.innerHTML = "<p style='color:#6c757d;text-align:center;margin:20px 0'>Nenhuma alteração registrada para " + esc(ym) + ".</p>";
+  } else {
+    var html = "<table class='milTable' style='width:100%;border-collapse:collapse'>"
+      + "<thead><tr><th>Data/Hora</th><th>Usuário / Seção</th><th>Militar / Data</th><th>Alteração</th></tr></thead><tbody>";
+    lista.forEach(function(log){
+      var dtStr = log.ts ? new Date(log.ts).toLocaleString("pt-BR") : "";
+      var det = {};
+      try { det = JSON.parse(log.detalhes || "{}"); } catch(e){ det = {}; }
+      var alvo = "—";
+      var alt = esc(log.acao || "");
+      if (log.acao === "edicao"){
+        var pe = (typeof D !== "undefined" && Array.isArray(D.pessoas))
+          ? D.pessoas.find(function(x){ return x.id === det.militar_id; })
+          : null;
+        var nomeMil = pe ? ((pe.posto || "") + " " + (pe.nome || det.militar_id)).trim() : (det.militar_id || "");
+        var diaStr = det.dia != null ? (" · Dia " + String(det.dia).padStart(2, "0")) : "";
+        var grpStr = det.grupo ? (" (" + det.grupo + ")") : "";
+        alvo = esc(nomeMil + grpStr + diaStr);
+        var deVal = det.de ? det.de : "—";
+        var paraVal = det.para ? det.para : "—";
+        alt = "<strong>" + esc(deVal) + " → " + esc(paraVal) + "</strong>";
+      } else if (log.acao === "fechar_competencia"){
+        alvo = esc(ym);
+        alt = "<span style='color:#842029;font-weight:600'>Competência fechada</span>";
+      } else if (log.acao === "reabrir_competencia"){
+        alvo = esc(ym);
+        alt = "<span style='color:#14532d;font-weight:600'>Competência reaberta</span>";
+      }
+      html += "<tr>"
+        + "<td style='white-space:nowrap'>" + esc(dtStr) + "</td>"
+        + "<td><strong>" + esc(log.nome || "") + "</strong> <span style='color:#6c757d'>(" + esc(log.perfil || "") + ")</span></td>"
+        + "<td>" + alvo + "</td>"
+        + "<td>" + alt + "</td>"
+        + "</tr>";
+    });
+    html += "</tbody></table>";
+    body.innerHTML = html;
+  }
+
+  box.appendChild(cab);
+  box.appendChild(body);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  function fecharModal(){ if (ov.parentNode) ov.parentNode.removeChild(ov); }
+  cab.querySelector("#btnFecharHist").onclick = fecharModal;
+  ov.addEventListener("mousedown", function(e){ if (e.target === ov) fecharModal(); });
+}
+
+function abrirHistoricoCompetencia(){
+  if (!(perfilAtual === "Admin" || perfilAtual === "Mestre")){
+    alert("Acesso restrito a Admin/Mestre.");
+    return;
+  }
+  var ym = String(D.competencia || "").slice(0, 7);
+  Transport.call("apiGetLogs", [Sessao.token, ym]).then(function(r){
+    if (!r || !r.ok){
+      alert("Erro ao consultar histórico: " + ((r && r.erro) || "falha no servidor"));
+      return;
+    }
+    renderizarModalHistorico(r.logs || [], ym);
+  }).catch(function(e){
+    alert("Erro ao consultar histórico: " + (e && e.message || e));
+  });
 }
 
 function pedirPin(){  return new Promise(function(resolve){

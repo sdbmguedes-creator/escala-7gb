@@ -65,6 +65,17 @@ def resolver_token(token):
 def _norm_secao(val):
     return "".join(str(val or "").strip().upper().split())
 
+def dia_iso(competencia, dia):
+    """Normaliza o dia de uma marca para a chave que o frontend usa (AAAA-MM-DD).
+    O banco guarda só o número do dia (ver _push); sem esta conversão o pull
+    devolvia chaves 'grupo|id|5' que nunca casam com 'grupo|id|2026-11-05'
+    e as marcas sumiam do tela após logoff/login/F5."""
+    raw = str(dia if dia is not None else "").strip()
+    if raw.isdigit():
+        return f"{str(competencia)[:7]}-{int(raw):02d}"
+    return raw
+
+
 def pode_gravar(perfil, grupo, militar_id, elenco_map):
     if perfil in ("Admin", "Mestre"):
         return True
@@ -602,7 +613,7 @@ class Handler(BaseHTTPRequestHandler):
                 mov = fut_mov.result()
 
             marcas_out = [
-                {"g": m["grupo"], "i": m["militar_id"], "d": m["dia"], "c": m["codigo"]}
+                {"g": m["grupo"], "i": m["militar_id"], "d": dia_iso(competencia, m["dia"]), "c": m["codigo"]}
                 for m in marcas
             ]
 
@@ -649,6 +660,9 @@ class Handler(BaseHTTPRequestHandler):
                 "vis":         extras.get("vis", {}),
                 "visLinhas":   extras.get("visLinhas", {}),
                 "aco":         extras.get("aco", []),
+                "fechada":     bool(extras.get("fechada")),
+                "fechadaPor":  extras.get("fechada_por", ""),
+                "fechadaEm":   extras.get("fechada_em", ""),
             }
 
             payload_pull = {
@@ -693,7 +707,7 @@ class Handler(BaseHTTPRequestHandler):
             marcas_rows = sb_select("marcas", {"competencia": competencia}) or []
             marcas_map = {}
             for m in marcas_rows:
-                marcas_map[f"{m['grupo']}|{m['militar_id']}|{m['dia']}"] = m
+                marcas_map[f"{m['grupo']}|{m['militar_id']}|{dia_iso(competencia, m['dia'])}"] = m
 
             comentarios_rows = sb_select("comments", {"competencia": competencia}) or []
             comentarios_map = {}
@@ -719,6 +733,24 @@ class Handler(BaseHTTPRequestHandler):
                 meta_extras["aco"] = []
             meta_alterada = False
 
+            fechada = bool(meta_extras.get("fechada"))
+            so_reabre = (
+                perfil == "Admin"
+                and bool(ops)
+                and all(o and o.get("t") == "fechamento" and o.get("fechada") is False for o in ops)
+            )
+            if fechada and not so_reabre:
+                json_response(
+                    self,
+                    {
+                        "ok": False,
+                        "fechada": True,
+                        "erro": "competência fechada (somente leitura)",
+                    },
+                    423,
+                )
+                return
+
             # ═══ FIX A — deltas por tabela (upsert + delete pontual) ═══
             # Só o que ESTE push mudou vai ao banco. Nunca DELETE-all.
             marcas_upsert    = {}
@@ -727,6 +759,8 @@ class Handler(BaseHTTPRequestHandler):
             comments_deletar = []
             elenco_upsert    = {}
             aco_upsert       = {}   # chave: (dia, turno) → oficial
+            edicoes_log      = []
+            fechamento_log   = []
             # ═══════════════════════════════════════════════════════════
 
             recusadas = []
@@ -760,8 +794,11 @@ class Handler(BaseHTTPRequestHandler):
                     elif not pode_gravar(perfil, p[0], p[1], elenco_map):
                         motivo = f"perfil {perfil} não pode gravar em {p[0]}"
                     else:
+                        kn = f"{p[0]}|{p[1]}|{dia_iso(competencia, p[2])}"
+                        anterior = (marcas_map.get(kn) or marcas_map.get(k) or {}).get("codigo", "")
+                        novo = op.get("v") if op.get("v") not in (None, "") else ""
                         if op.get("v") not in (None, ""):
-                            marcas_map[k] = {
+                            marcas_map[kn] = {
                                 "competencia": competencia,
                                 "grupo":       p[0],
                                 "militar_id":  p[1],
@@ -770,16 +807,25 @@ class Handler(BaseHTTPRequestHandler):
                                 "ts":          agora,
                                 "autor":       u["nome"],
                             }
-                            marcas_upsert[k] = marcas_map[k]
+                            marcas_upsert[k] = marcas_map[kn]
                             if k in marcas_deletar:
                                 marcas_deletar.remove(k)
                         else:
-                            if k in marcas_map:
-                                del marcas_map[k]
+                            if kn in marcas_map:
+                                del marcas_map[kn]
                                 deletadas += 1
                             marcas_upsert.pop(k, None)
                             if k not in marcas_deletar:
                                 marcas_deletar.append(k)
+                        if str(anterior) != str(novo):
+                            edicoes_log.append({
+                                "competencia": competencia,
+                                "grupo": p[0],
+                                "militar_id": p[1],
+                                "dia": dia_int,
+                                "de": anterior,
+                                "para": novo,
+                            })
                         aplicadas += 1
 
                 elif op["t"] == "comment":
@@ -976,6 +1022,18 @@ class Handler(BaseHTTPRequestHandler):
                         meta_alterada = True
                         aplicadas += 1
 
+                elif op["t"] == "fechamento":
+                    if perfil != "Admin":
+                        motivo = "fechamento exige Admin"
+                    else:
+                        novo_fechada = bool(op.get("fechada"))
+                        meta_extras["fechada"] = novo_fechada
+                        meta_extras["fechada_por"] = u["nome"]
+                        meta_extras["fechada_em"] = agora
+                        meta_alterada = True
+                        aplicadas += 1
+                        fechamento_log.append(novo_fechada)
+
                 else:
                     motivo = f"tipo desconhecido: {op.get('t')}"
 
@@ -1011,13 +1069,21 @@ class Handler(BaseHTTPRequestHandler):
             for k_del in marcas_deletar:
                 partes = str(k_del).split("|")
                 if len(partes) == 3:
+                    # O banco guarda o número do dia (mesmo formato do upsert).
+                    dia_del = str(partes[2]).strip()
+                    if "-" in dia_del:
+                        dia_del = dia_del.split("-")[-1]
+                    try:
+                        dia_del = str(int(dia_del))
+                    except (ValueError, TypeError):
+                        pass
                     sb_request(
                         "DELETE", "marcas",
                         params={
                             "competencia": f"eq.{competencia}",
                             "grupo":       f"eq.{partes[0]}",
                             "militar_id":  f"eq.{partes[1]}",
-                            "dia":         f"eq.{partes[2]}",
+                            "dia":         f"eq.{dia_del}",
                         },
                     )
 
@@ -1078,6 +1144,28 @@ class Handler(BaseHTTPRequestHandler):
                     versao_final = meta_versao + 1
                 except Exception as e:
                     print(f"[push/meta] erro: {e}")
+
+            for item_log in edicoes_log[:200]:
+                try:
+                    registrar_log(
+                        u["nome"],
+                        perfil,
+                        "edicao",
+                        json.dumps(item_log, ensure_ascii=False),
+                    )
+                except Exception:
+                    pass
+            for novo_fechada in fechamento_log:
+                try:
+                    acao_f = "fechar_competencia" if novo_fechada else "reabrir_competencia"
+                    registrar_log(
+                        u["nome"],
+                        perfil,
+                        acao_f,
+                        json.dumps({"competencia": competencia, "fechada": novo_fechada}, ensure_ascii=False),
+                    )
+                except Exception:
+                    pass
 
             json_response(self, {"ok": True, "versao": versao_final, "aplicadas": aplicadas, "recusadas": recusadas})
 
@@ -1140,8 +1228,20 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            competencia = str(corpo.get("competencia") or "")[:7]
             # Busca os 200 logs mais recentes (ordem decrescente)
             logs = sb_select("logs_acesso", order="ts.desc", limit=200) or []
+            if competencia:
+                filtrados = []
+                for l in logs:
+                    det_raw = l.get("detalhes") or ""
+                    try:
+                        det = json.loads(det_raw) if isinstance(det_raw, str) and det_raw.startswith("{") else None
+                    except Exception:
+                        det = None
+                    if isinstance(det, dict) and det.get("competencia") == competencia:
+                        filtrados.append(l)
+                logs = filtrados
             json_response(self, {"ok": True, "logs": logs})
         except Exception as e:
             json_response(self, {"ok": False, "erro": str(e)}, 500)
