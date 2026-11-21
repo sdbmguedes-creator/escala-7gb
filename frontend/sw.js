@@ -1,8 +1,10 @@
 /* global Response */
-const CACHE_NAME = 'escala7gb-v16';
+const CACHE_NAME = 'escala7gb-v17';
 const ASSETS = [
   './',
   './index_v14.html',
+  './storage.js',
+  './regras.js',
   './sync.js',
   './manifest.json'
 ];

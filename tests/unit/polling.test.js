@@ -1089,10 +1089,12 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
   });
 });
 
-describe('Fila fantasma e coalescência (código real de index_v14.html + sync.js)', () => {
+describe('Fila fantasma e coalescência (código real de index_v14.html + storage.js + regras.js + sync.js)', () => {
   const html = fs.readFileSync(path.resolve(__dirname, '../../frontend/index_v14.html'), 'utf8');
+  const storageJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/storage.js'), 'utf8');
+  const regrasJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/regras.js'), 'utf8');
   const syncJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/sync.js'), 'utf8');
-  const codigo = html + '\n' + syncJs;
+  const codigo = html + '\n' + storageJs + '\n' + regrasJs + '\n' + syncJs;
   const helpers = codigo.split('/* @@sync-helpers-begin */')[1].split('/* @@sync-helpers-end */')[0];
   const { opsDeGravacao, coalescerOps } = new Function(helpers + '; return { opsDeGravacao, coalescerOps };')();
   const enfSrc = codigo.match(/enfileirar: function\(ym, ops\)\{[\s\S]*?\r?\n  \},\r?\n/)[0].replace(/,\s*$/, '');
@@ -1170,12 +1172,81 @@ describe('Fila fantasma e coalescência (código real de index_v14.html + sync.j
     expect(codigo).toContain('if (String(D.competencia).slice(0, 7) !== ym) return;');
     expect(codigo).toContain('if (String(D.competencia).slice(0, 7) !== ym) return false;');
   });
+
+  it('gravarMes (storage.js) adota baseline na 1ª visita e enfileira apenas o delta nas seguintes', () => {
+    const vm = require('vm');
+    const store = {};
+    const sandbox = {
+      localStorage: {
+        getItem: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+        setItem: (k, v) => { store[k] = String(v); },
+        removeItem: (k) => { delete store[k]; }
+      },
+      console: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      D: { competencia: '2026-11-01', pessoas: [], mes: [], movimentos: [], visLinhas: {}, acoOficiais: {}, removidos: {}, params: {} },
+      COD: [], SBS: [], ORDEM_ESC: {}, MES_BASE: [],
+      marks: {}, comments: {}, vis: {}, aco: [],
+      afastMesclado: false, autoX: false, statusMes: 'ativa',
+      perfilAtual: 'Mestre',
+      ehMestre: () => true,
+      invalidarCachePessoas: () => {},
+      reconstruirIndiceMarcas: () => {},
+      expurgarHostDuplicados: () => {},
+      limparOrfas: () => {},
+      migrarAdmSemEscala: () => {},
+      normalizarAfastamentos: () => {},
+      construirElencoNovo: () => ({ elenco: [], voltaram: [], ficaram: [] }),
+      avisosLegado: () => {},
+      status: () => {},
+      desenhar: () => {},
+      dataBR: (v) => v,
+      mesAnoBR: (v) => v,
+      ordenarOficiais: (v) => v,
+      intervaloISO: () => ({ ini: '', fim: '' }),
+      fimDeAfast: () => '',
+      sobrepoeMes: () => false,
+      Location: {},
+      location: { protocol: 'https:' },
+      navigator: { onLine: true },
+      AbortController: globalThis.AbortController,
+      alert: vi.fn(),
+      esc: (s) => String(s || ''),
+      estadoSalvavel: () => ({}),
+      carregarEstado: () => {},
+      setInterval: vi.fn(),
+      clearInterval: vi.fn(),
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+      document: { addEventListener: vi.fn(), getElementById: () => null, hidden: false },
+      window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
+      Blob: globalThis.Blob,
+      URL: { createObjectURL: vi.fn() },
+      FileReader: class {}
+    };
+    sandbox.globalThis = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(storageJs, sandbox, { filename: 'storage.js' });
+    vm.runInContext(syncJs, sandbox, { filename: 'sync.js' });
+    vm.runInContext('Sync.ligado = true; Sync.fila = []; _ultimoSync = {};', sandbox);
+
+    vm.runInContext('gravarMes("2026-11", { marks: { "1ªSB|1|2026-11-01": "X" }, comments: {}, vis: {}, visLinhas: {}, aco: [], mes: [] });', sandbox);
+    expect(vm.runInContext('Sync.fila.length', sandbox)).toBe(0);
+
+    vm.runInContext('gravarMes("2026-11", { marks: { "1ªSB|1|2026-11-01": "X", "1ªSB|2|2026-11-02": "F" }, comments: {}, vis: {}, visLinhas: {}, aco: [], mes: [] });', sandbox);
+    const fila = JSON.parse(vm.runInContext('JSON.stringify(Sync.fila)', sandbox));
+    expect(fila.length).toBe(1);
+    expect(fila[0].ops.length).toBe(1);
+    expect(fila[0].ops[0]).toMatchObject({ t: 'marca', k: '1ªSB|2|2026-11-02', v: 'F' });
+    expect(typeof fila[0].ops[0].ts).toBe('number');
+  });
 });
 
-describe('Multiusuário (A e B) na competência 2026-11 — código real de index_v14.html + sync.js', () => {
+describe('Multiusuário (A e B) na competência 2026-11 — código real de index_v14.html + storage.js + regras.js + sync.js', () => {
   const html = fs.readFileSync(path.resolve(__dirname, '../../frontend/index_v14.html'), 'utf8');
+  const storageJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/storage.js'), 'utf8');
+  const regrasJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/regras.js'), 'utf8');
   const syncJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/sync.js'), 'utf8');
-  const codigo = html + '\n' + syncJs;
+  const codigo = html + '\n' + storageJs + '\n' + regrasJs + '\n' + syncJs;
   const helpers = codigo.split('/* @@sync-helpers-begin */')[1].split('/* @@sync-helpers-end */')[0];
   const { opsDeGravacao, coalescerOps } = new Function(helpers + '; return { opsDeGravacao, coalescerOps };')();
   const enfSrc = codigo.match(/enfileirar: function\(ym, ops\)\{[\s\S]*?\r?\n  \},\r?\n/)[0].replace(/,\s*$/, '');

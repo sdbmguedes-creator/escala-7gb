@@ -132,19 +132,37 @@ function extrairBlocosScript(html) {
   return blocos;
 }
 
-describe('Boot do frontend (index_v14.html + sync.js)', () => {
+describe('Boot do frontend (index_v14.html + storage.js + regras.js + sync.js)', () => {
   const htmlPath = path.resolve(__dirname, '../../frontend/index_v14.html');
+  const storagePath = path.resolve(__dirname, '../../frontend/storage.js');
+  const regrasPath = path.resolve(__dirname, '../../frontend/regras.js');
   const syncPath = path.resolve(__dirname, '../../frontend/sync.js');
   const html = fs.readFileSync(htmlPath, 'utf8');
+  const storageCode = fs.readFileSync(storagePath, 'utf8');
+  const regrasCode = fs.readFileSync(regrasPath, 'utf8');
   const syncCode = fs.readFileSync(syncPath, 'utf8');
   const blocos = extrairBlocosScript(html);
+  const scriptsExternos = {
+    'storage.js': storageCode,
+    'regras.js': regrasCode,
+    'sync.js': syncCode
+  };
 
-  it('carrega index_v14.html + sync.js em HTTP sem erros e exibe o modal de login (#telaPin)', () => {
+  it('carrega scripts na ordem exata de dependências antes de sync.js e boot()', () => {
+    const srcs = blocos.filter((b) => b.src).map((b) => b.src);
+    expect(srcs).toEqual(['storage.js', 'regras.js', 'sync.js']);
+    const idxSync = blocos.findIndex((b) => b.src === 'sync.js');
+    const idxBoot = blocos.findIndex((b) => !b.src && b.code.includes('function boot()'));
+    expect(idxSync).toBeGreaterThan(-1);
+    expect(idxBoot).toBeGreaterThan(idxSync);
+  });
+
+  it('carrega index_v14.html + módulos em HTTP sem erros e exibe o modal de login (#telaPin)', () => {
     const { sandbox, appendedToBody, elementsById } = criarDomMinimo({ protocol: 'https:' });
     const ctx = vm.createContext(sandbox);
 
     for (const bloco of blocos) {
-      const codigo = bloco.src === 'sync.js' ? syncCode : bloco.code;
+      const codigo = bloco.src ? (scriptsExternos[bloco.src] ?? bloco.code) : bloco.code;
       const filename = bloco.src || 'index_v14.html';
       vm.runInContext(codigo, ctx, { filename });
     }
@@ -152,6 +170,14 @@ describe('Boot do frontend (index_v14.html + sync.js)', () => {
     expect(typeof ctx.Transport).toBe('object');
     expect(typeof ctx.Sessao).toBe('object');
     expect(vm.runInContext('typeof Sync', ctx)).toBe('object');
+    expect(typeof ctx.gravarMes).toBe('function');
+    expect(typeof ctx.carregarEstado).toBe('function');
+    expect(typeof ctx.exportar).toBe('function');
+    expect(typeof ctx.importar).toBe('function');
+    expect(typeof ctx.contagemSB).toBe('function');
+    expect(typeof ctx.motoristasSB).toBe('function');
+    expect(typeof ctx.efetivoFemininoSB).toBe('function');
+    expect(typeof ctx.calcularTotalizadoresDiaSB).toBe('function');
     expect(typeof ctx.pedirPin).toBe('function');
     expect(typeof ctx.iniciarApp).toBe('function');
 
@@ -165,7 +191,7 @@ describe('Boot do frontend (index_v14.html + sync.js)', () => {
     const ctx = vm.createContext(sandbox);
 
     for (const bloco of blocos) {
-      const codigo = bloco.src === 'sync.js' ? syncCode : bloco.code;
+      const codigo = bloco.src ? (scriptsExternos[bloco.src] ?? bloco.code) : bloco.code;
       const filename = bloco.src || 'index_v14.html';
       vm.runInContext(codigo, ctx, { filename });
     }

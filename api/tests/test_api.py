@@ -192,8 +192,30 @@ def test_get_sync_js_retorna_javascript_nao_html():
     assert "var Transport" in body and "const Sync" in body
 
 
+def test_get_storage_js_retorna_javascript_nao_html():
+    status, headers, body = _rodar_get("/storage.js")
+    assert status == 200
+    assert headers.get("content-type", "").startswith("application/javascript")
+    assert not body.lstrip().startswith("<")
+    assert "function gravarMes" in body and "function carregarEstado" in body
+
+
+def test_get_regras_js_retorna_javascript_nao_html():
+    status, headers, body = _rodar_get("/regras.js")
+    assert status == 200
+    assert headers.get("content-type", "").startswith("application/javascript")
+    assert not body.lstrip().startswith("<")
+    assert "function contagemSB" in body and "function calcularTotalizadoresDiaSB" in body
+
+
 def test_get_raiz_retorna_html():
     status, headers, body = _rodar_get("/")
     assert status == 200
     assert headers.get("content-type", "").startswith("text/html")
-    assert '<script src="sync.js"></script>' in body
+    tag_storage = '<script src="storage.js"></script>'
+    tag_regras = '<script src="regras.js"></script>'
+    tag_sync = '<script src="sync.js"></script>'
+    assert tag_storage in body
+    assert tag_regras in body
+    assert tag_sync in body
+    assert body.index(tag_storage) < body.index(tag_regras) < body.index(tag_sync)
