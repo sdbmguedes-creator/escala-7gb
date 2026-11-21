@@ -50,14 +50,21 @@ describe('Multiusuario A/B na competencia 2026-11 (mock)', () => {
     cy.wait('@login');
     cy.wait('@pull');
     cy.get('#telaPin').should('not.exist');
+    cy.window().should(w => {
+      expect(w.eval('Sync.pullInicialConcluido')).to.eq(true);
+      expect(w.eval('D.mes.some(m => m.id === "M1")')).to.eq(true);
+    });
   });
 
   const irPara = ym => {
-    cy.get('#mesSel').invoke('val', ym).trigger('change');
-    cy.wrap(null).should(() => {
-      expect(pulls.some(p => p.ym === ym)).to.eq(true);
+    cy.window().then(w => {
+      if (String(w.eval('D.competencia')).slice(0, 7) === ym) return;
+      cy.get('#mesSel').invoke('val', ym).trigger('change');
+      cy.wrap(null).should(() => {
+        expect(pulls.some(p => p.ym === ym)).to.eq(true);
+      });
+      cy.window().should(win => expect(String(win.eval('D.competencia')).slice(0, 7)).to.eq(ym));
     });
-    cy.window().should(w => expect(String(w.eval('D.competencia')).slice(0, 7)).to.eq(ym));
   };
   const estado = (w, expr) => w.eval(expr);
 
