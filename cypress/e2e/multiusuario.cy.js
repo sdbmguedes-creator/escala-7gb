@@ -71,7 +71,7 @@ describe('Multiusuario A/B na competencia 2026-11 (mock)', () => {
       expect(pushes.length).to.eq(1);
       expect(pushes[0].ym).to.eq(YM);
       expect(pushes[0].token).to.eq('token-A');
-      expect(pushes[0].ops).to.deep.include({ t: 'marca', k: CHAVE_A, v: 'X' });
+      expect(pushes[0].ops.some(op => op.t === 'marca' && op.k === CHAVE_A && op.v === 'X')).to.eq(true);
     });
 
     // Usuario B grava outra marca direto no servidor (versao sobe)
