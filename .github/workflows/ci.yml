@@ -81,3 +81,15 @@ jobs:
           browser: chrome
           # O Cypress vai testar a URL de produção real
           # Se preferir testar o preview da Vercel, a configuração é um pouco mais complexa.
+
+      - name: Upload Cypress failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-failure-screenshots-${{ github.run_id }}
+          path: cypress/screenshots/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+          
+
+          

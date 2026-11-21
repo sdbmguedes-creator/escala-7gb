@@ -1169,3 +1169,151 @@ describe('Fila fantasma e coalescência (código real de index_v14.html)', () =>
     expect(html).toContain('if (String(D.competencia).slice(0, 7) !== ym) return false;');
   });
 });
+
+describe('Multiusuário (A e B) na competência 2026-11 — código real de index_v14.html', () => {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../frontend/index_v14.html'), 'utf8');
+  const helpers = html.split('/* @@sync-helpers-begin */')[1].split('/* @@sync-helpers-end */')[0];
+  const { opsDeGravacao, coalescerOps } = new Function(helpers + '; return { opsDeGravacao, coalescerOps };')();
+  const enfSrc = html.match(/enfileirar: function\(ym, ops\)\{[\s\S]*?\r?\n  \},\r?\n/)[0].replace(/,\s*$/, '');
+  const reaplicarSrc = html.match(/function reaplicarFilaPendenteLocal\(ym\)\{[\s\S]*?\r?\n\}\r?\n/)[0];
+  const reaplicar = new Function('ctx', 'with(ctx){' + reaplicarSrc + '; return reaplicarFilaPendenteLocal;}');
+  const diffMarcas = (antes, depois) => {
+    const ks = new Set([...Object.keys(antes.marks), ...Object.keys(depois.marks)]);
+    return [...ks].filter(k => antes.marks[k] !== depois.marks[k]).map(k => ({ t: 'marca', k, v: depois.marks[k] || '' }));
+  };
+
+  // Servidor em memória: versão por competência + marcas
+  const novoServidor = () => {
+    const dados = {};
+    const comp = ym => (dados[ym] = dados[ym] || { versao: 1, marks: {} });
+    return {
+      push(ym, ops) {
+        const c = comp(ym);
+        coalescerOps(ops).forEach(op => {
+          if (op.t !== 'marca') return;
+          if (op.v) c.marks[op.k] = op.v; else delete c.marks[op.k];
+        });
+        c.versao += 1;
+        return { ok: true, versao: c.versao };
+      },
+      pull(ym, desde) {
+        const c = comp(ym);
+        if (desde != null && desde === c.versao) return { ok: true, versao: c.versao, semMudanca: true };
+        return { ok: true, versao: c.versao, marks: { ...c.marks } };
+      }
+    };
+  };
+
+  // Cliente (um usuário) com estado local, fila e baseline por competência
+  const novoCliente = (servidor) => {
+    const Sync = { ligado: true, fila: [], suprimir: 0, versaoPorYm: {}, guardarFila: vi.fn(), agendar: vi.fn() };
+    Sync.enfileirar = new Function('Sync', 'coalescerOps', 'return {' + enfSrc + '}.enfileirar;')(Sync, coalescerOps);
+    const ctx = { marks: {}, comments: {}, vis: {}, aco: [], D: { mes: [], visLinhas: {}, competencia: '2026-11' }, Sync, console };
+    const baseline = {};
+    const cli = {
+      Sync, ctx,
+      abrir(ym) {          // troca de competência: adota estado local como baseline (sem ops)
+        ctx.D.competencia = ym;
+        baseline[ym] = baseline[ym] || { marks: {} };
+        ctx.marks = JSON.parse(JSON.stringify(baseline[ym].marks));
+        reaplicar(ctx)(ym);
+      },
+      pull(ym) {
+        const r = servidor.pull(ym, Sync.fila.length ? null : Sync.versaoPorYm[ym] ?? null);
+        if (r.semMudanca) return r;
+        Sync.suprimir++;
+        ctx.marks = r.marks;
+        reaplicar(ctx)(ym);
+        baseline[ym] = { marks: JSON.parse(JSON.stringify(r.marks)) };
+        Sync.suprimir--;
+        Sync.versaoPorYm[ym] = r.versao;
+        return r;
+      },
+      marcar(ym, k, v) {
+        ctx.marks[k] = v;
+        const ops = opsDeGravacao(baseline[ym], { marks: ctx.marks }, diffMarcas);
+        if (ops.length) Sync.enfileirar(ym, ops);
+        baseline[ym] = { marks: { ...ctx.marks } };
+      },
+      flush() {
+        const itens = Sync.fila.splice(0);
+        itens.forEach(it => { Sync.versaoPorYm[it.ym] = servidor.push(it.ym, it.ops).versao; });
+      }
+    };
+    return cli;
+  };
+
+  const K1 = '1ªSB|1|2026-11-05';
+  const K2 = '1ªSB|2|2026-11-06';
+
+  it('A marca uma célula e B recebe via pull sem perder edição local pendente na fila', () => {
+    const srv = novoServidor();
+    const A = novoCliente(srv), B = novoCliente(srv);
+    A.abrir('2026-11'); B.abrir('2026-11');
+    A.pull('2026-11'); B.pull('2026-11');
+
+    B.marcar('2026-11', K2, 'F');            // edição local pendente de B
+    expect(B.Sync.fila.length).toBe(1);
+
+    A.marcar('2026-11', K1, 'X');
+    A.flush();                                // A envia (versão sobe)
+    expect(srv.pull('2026-11').marks).toEqual({ [K1]: 'X' });
+
+    B.pull('2026-11');                        // B recebe a marca de A
+    expect(B.ctx.marks[K1]).toBe('X');
+    expect(B.ctx.marks[K2]).toBe('F');        // edição pendente reaplicada
+    expect(B.Sync.fila.length).toBe(1);       // continua na fila, sem duplicar
+    expect(B.Sync.fila[0].ops).toEqual([{ t: 'marca', k: K2, v: 'F' }]);
+
+    B.flush();
+    expect(srv.pull('2026-11').marks).toEqual({ [K1]: 'X', [K2]: 'F' });
+    A.pull('2026-11');
+    expect(A.ctx.marks).toEqual({ [K1]: 'X', [K2]: 'F' });
+    expect(A.Sync.fila.length).toBe(0);
+  });
+
+  it('remoção pendente local (marca limpa) é preservada após pull de outro usuário', () => {
+    const srv = novoServidor();
+    const A = novoCliente(srv), B = novoCliente(srv);
+    A.abrir('2026-11'); A.pull('2026-11'); A.marcar('2026-11', K1, 'X'); A.flush();
+    B.abrir('2026-11'); B.pull('2026-11');
+    B.marcar('2026-11', K1, '');              // B limpa localmente (pendente)
+    A.marcar('2026-11', K2, 'F'); A.flush();
+    B.pull('2026-11');
+    expect(B.ctx.marks[K1]).toBeUndefined();
+    expect(B.ctx.marks[K2]).toBe('F');
+  });
+
+  it('troca 2026-11 -> 2026-10 -> 2026-11 mantém a marcação salva e não gera fila fantasma', () => {
+    const srv = novoServidor();
+    const A = novoCliente(srv);
+    A.abrir('2026-11'); A.pull('2026-11');
+    A.marcar('2026-11', K1, 'X');
+    A.flush();
+    expect(A.Sync.fila.length).toBe(0);
+
+    A.abrir('2026-10'); A.pull('2026-10');
+    expect(A.Sync.fila.length).toBe(0);
+    expect(Object.keys(A.ctx.marks).length).toBe(0);
+
+    A.abrir('2026-11'); A.pull('2026-11');
+    expect(A.ctx.marks[K1]).toBe('X');
+    expect(A.Sync.fila.length).toBe(0);
+    expect(srv.pull('2026-10').marks).toEqual({});
+  });
+
+  it('troca rápida de competência com marcação ainda na fila preserva a edição e não duplica ops', () => {
+    const srv = novoServidor();
+    const A = novoCliente(srv);
+    A.abrir('2026-11'); A.pull('2026-11');
+    A.marcar('2026-11', K1, 'X');            // ainda não enviada
+    A.abrir('2026-10'); A.abrir('2026-11'); A.abrir('2026-10'); A.abrir('2026-11');
+    A.pull('2026-11');
+    expect(A.ctx.marks[K1]).toBe('X');
+    expect(A.Sync.fila.length).toBe(1);
+    expect(A.Sync.fila[0].ops).toEqual([{ t: 'marca', k: K1, v: 'X' }]);
+    A.flush();
+    expect(A.Sync.fila.length).toBe(0);
+    expect(srv.pull('2026-11').marks).toEqual({ [K1]: 'X' });
+  });
+});
