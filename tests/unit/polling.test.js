@@ -1321,3 +1321,226 @@ describe('Multiusuário (A e B) na competência 2026-11 — código real de inde
     expect(srv.pull('2026-11').marks).toEqual({ [K1]: 'X' });
   });
 });
+
+describe('Resiliência offline da fila e eventos online/offline (frontend/sync.js)', () => {
+  const syncJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/sync.js'), 'utf8');
+
+  function criarAmbienteSync() {
+    const listeners = {};
+    const elements = {};
+    const store = {
+      'escala7gb-sessao': JSON.stringify({ token: 'mock-token', perfil: 'Mestre', nome: 'Tester' })
+    };
+
+    const elSyncStatus = {
+      textContent: '',
+      title: '',
+      style: { color: '' }
+    };
+    elements['syncStatus'] = elSyncStatus;
+
+    const mockDocument = {
+      getElementById: (id) => elements[id] || null,
+      hidden: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn()
+    };
+
+    const mockWindow = {
+      addEventListener: (ev, fn) => {
+        if (!listeners[ev]) listeners[ev] = [];
+        listeners[ev].push(fn);
+      },
+      removeEventListener: (ev, fn) => {
+        if (!listeners[ev]) return;
+        listeners[ev] = listeners[ev].filter(f => f !== fn);
+      },
+      trigger: (ev) => {
+        if (listeners[ev]) listeners[ev].forEach(fn => fn());
+      }
+    };
+
+    const mockLocalStorage = {
+      getItem: (k) => store[k] || null,
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; }
+    };
+
+    const mockNavigator = { onLine: true };
+
+    const mockTransport = {
+      disponivel: () => true,
+      call: vi.fn((nome) => {
+        if (nome === 'apiPush') return Promise.resolve({ ok: true, versao: 2 });
+        if (nome === 'apiPull') return Promise.resolve({ ok: true, versao: 2, marcas: [] });
+        return Promise.resolve({ ok: true });
+      })
+    };
+
+    const mockSessao = { token: 'mock-token' };
+    const mockD = { competencia: '2026-11-01', movimentos: [] };
+
+    // Extrai o objeto Sync e atualizarDoServidor do código de sync.js
+    const vm = require('vm');
+    const sandbox = {
+      location: { protocol: 'https:' },
+      window: mockWindow,
+      document: mockDocument,
+      localStorage: mockLocalStorage,
+      navigator: mockNavigator,
+      Transport: mockTransport,
+      Sessao: mockSessao,
+      D: mockD,
+      console: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      setInterval: vi.fn(),
+      clearInterval: vi.fn(),
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+      sincronizarMes: vi.fn().mockResolvedValue(true),
+      carregarEstado: vi.fn(),
+      desenhar: vi.fn(),
+      agendarPoll: vi.fn(),
+      reconstruirIndiceMarcas: vi.fn(),
+      estadoSalvavel: vi.fn().mockReturnValue({}),
+      gravarMes: vi.fn()
+    };
+    sandbox.globalThis = sandbox;
+
+    vm.createContext(sandbox);
+    vm.runInContext(syncJs, sandbox);
+    vm.runInContext('Sessao.carregar()', sandbox);
+
+    const SyncInst = vm.runInContext('Sync', sandbox);
+    const atualizarDoServidorInst = vm.runInContext('atualizarDoServidor', sandbox);
+    sandbox.Transport = mockTransport;
+    vm.runInContext('Transport = globalThis.Transport;', sandbox);
+
+    return {
+      Sync: SyncInst,
+      atualizarDoServidor: atualizarDoServidorInst,
+      sandbox,
+      elSyncStatus,
+      mockWindow,
+      mockNavigator,
+      mockTransport,
+      store
+    };
+  }
+
+  it('exibe "sincronizado" quando ligado e fila está vazia', () => {
+    const env = criarAmbienteSync();
+    env.Sync.iniciar();
+    expect(env.Sync.estado).toBe('ok');
+    expect(env.elSyncStatus.textContent).toBe('sincronizado');
+    expect(env.elSyncStatus.style.color).toBe('#b7f0c1');
+  });
+
+  it('exibe indicador de contagem pendente quando há operações na fila (online)', () => {
+    const env = criarAmbienteSync();
+    env.Sync.iniciar();
+    env.Sync.fila = [
+      { ym: '2026-11', ops: [{ t: 'marca', k: '1|2026-11-01', v: 'X' }, { t: 'marca', k: '1|2026-11-02', v: 'F' }] }
+    ];
+    env.Sync.pintar();
+    expect(env.elSyncStatus.textContent).toBe('Pendente (2)…');
+    expect(env.elSyncStatus.style.color).toBe('#ffe08a');
+  });
+
+  it('exibe status offline com e sem contagem de pendências', () => {
+    const env = criarAmbienteSync();
+    env.Sync.iniciar();
+
+    env.mockNavigator.onLine = false;
+    env.Sync.estado = 'offline';
+    env.Sync.fila = [];
+    env.Sync.pintar();
+    expect(env.elSyncStatus.textContent).toBe('Offline');
+    expect(env.elSyncStatus.style.color).toBe('#ffb3b3');
+
+    env.Sync.fila = [
+      { ym: '2026-11', ops: [{ t: 'marca', k: '1|2026-11-01', v: 'X' }] }
+    ];
+    env.Sync.pintar();
+    expect(env.elSyncStatus.textContent).toBe('Offline · 1 pendente(s)');
+    expect(env.elSyncStatus.style.color).toBe('#ffb3b3');
+  });
+
+  it('registra listeners de online e offline e atualiza estado no evento offline', () => {
+    const env = criarAmbienteSync();
+    env.Sync.iniciar();
+    expect(typeof env.Sync._onlineHandler).toBe('function');
+    expect(typeof env.Sync._offlineHandler).toBe('function');
+
+    env.mockWindow.trigger('offline');
+    expect(env.Sync.estado).toBe('offline');
+    expect(env.elSyncStatus.textContent).toContain('Offline');
+  });
+
+  it('ao voltar online dispara flush da fila e pull imediato da competência ativa', async () => {
+    vi.useRealTimers();
+    const env = criarAmbienteSync();
+    env.Sync.iniciar();
+    env.Sync.pullInicialConcluido = true;
+    env.Sync.estado = 'offline';
+    env.Sync.fila = [
+      { ym: '2026-11', ops: [{ t: 'marca', k: '1|2026-11-01', v: 'X' }] }
+    ];
+
+    env.mockTransport.call.mockImplementation((nome) => {
+      if (nome === 'apiPush') {
+        return Promise.resolve({ ok: true, versao: 2 });
+      }
+      if (nome === 'apiPull') {
+        return Promise.resolve({ ok: true, versao: 2, marcas: [] });
+      }
+      return Promise.resolve({ ok: true });
+    });
+
+    await env.Sync.aoVoltarOnline();
+
+    // Fila deve ter sido enviada e esvaziada
+    expect(env.Sync.fila.length).toBe(0);
+    expect(env.Sync.estado).toBe('ok');
+    expect(env.elSyncStatus.textContent).toBe('sincronizado');
+
+    // apiPush e apiPull foram chamados
+    const pushCalls = env.mockTransport.call.mock.calls.filter(c => c[0] === 'apiPush');
+    const pullCalls = env.mockTransport.call.mock.calls.filter(c => c[0] === 'apiPull');
+    expect(pushCalls.length).toBe(1);
+    expect(pushCalls[0][1][0]).toBe('2026-11');
+    expect(pullCalls.length).toBe(1);
+    expect(pullCalls[0][1][0]).toBe('2026-11');
+  });
+
+  it('ao voltar online com boot offline prévio conclui sincronizarMes antes do flush', async () => {
+    vi.useRealTimers();
+    const env = criarAmbienteSync();
+    env.Sync.iniciar();
+    env.Sync.pullInicialConcluido = false;
+    env.Sync.fila = [
+      { ym: '2026-11', ops: [{ t: 'marca', k: '1|2026-11-01', v: 'X' }] }
+    ];
+
+    const mockSincronizar = vi.fn().mockResolvedValue(true);
+    env.sandbox.sincronizarMes = mockSincronizar;
+    const mockAgendar = vi.fn();
+    env.sandbox.agendarPoll = mockAgendar;
+
+    await env.Sync.aoVoltarOnline();
+
+    expect(mockSincronizar).toHaveBeenCalledWith('2026-11');
+    expect(env.Sync.pullInicialConcluido).toBe(true);
+    expect(env.sandbox.carregarEstado).toHaveBeenCalled();
+    expect(env.sandbox.desenhar).toHaveBeenCalled();
+    expect(mockAgendar).toHaveBeenCalledWith('2026-11');
+  });
+
+  it('ao disparar evento window online chama aoVoltarOnline', async () => {
+    const env = criarAmbienteSync();
+    env.Sync.aoVoltarOnline = vi.fn().mockResolvedValue();
+    env.Sync.iniciar();
+
+    env.mockWindow.trigger('online');
+    expect(env.Sync.aoVoltarOnline).toHaveBeenCalled();
+  });
+});

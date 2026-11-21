@@ -261,7 +261,7 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px;display:none;grid-template-col
     <button id="btnSair" style="display:none" onclick="sair()" title="Encerrar a sessão neste navegador">Sair</button>
   </span>
   <span id="status" style="color:#fff;font-size:12px;opacity:.9;margin-left:10px"></span>
-  <span id="syncStatus" style="font-size:11.5px;font-weight:600;margin-left:8px"></span>
+  <span id="syncStatus" aria-live="polite" style="font-size:11.5px;font-weight:600;margin-left:8px"></span>
 </header>
 <nav id="nav"></nav>
 <main id="main"></main>
@@ -5903,31 +5903,14 @@ async function abrirAuditoria() {
 
 // =========================================================
 // MONITOR DE CONEXÃO (OFFLINE / ONLINE)
+// Gerenciado centralmente por Sync (frontend/sync.js).
 // =========================================================
 function atualizarStatusConexao() {
-  var el = document.getElementById("syncStatus");
-  if (!el) return;
-  
-  if (navigator.onLine) {
-    if (!el.textContent || el.textContent.includes("OFFLINE")) {
-       el.textContent = "Sincronizando...";
-       el.style.color = "#4ade80"; // Verde claro
-       // Força uma sincronização imediata da fila
-       if (typeof Sync !== 'undefined' && Sync.ligado) {
-         var ym = String(D.competencia).slice(0, 7);
-         atualizarDoServidor(ym).catch(function(){});
-         // Se houver uma função flush da fila, chame aqui (ex: Sync.flush())
-       }
-    }
-  } else {
-    el.textContent = "⚠️ OFFLINE (Salvando local)";
-    el.style.color = "#ffc107"; // Amarelo
+  if (typeof Sync !== 'undefined' && typeof Sync.pintar === 'function') {
+    Sync.pintar();
   }
 }
-
-window.addEventListener("online", atualizarStatusConexao);
-window.addEventListener("offline", atualizarStatusConexao);
-setTimeout(atualizarStatusConexao, 1000); // Verifica ao carregar a página
+setTimeout(atualizarStatusConexao, 1000);
 
 // =========================================================
 // REGISTRO DO PWA (SERVICE WORKER)
