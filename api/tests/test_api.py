@@ -1,29 +1,72 @@
-import requests
+import os
+import sys
+
 import pytest
 
-# URL de produção. (Se quiser testar antes de subir, pode usar 'http://localhost:3000')
-BASE_URL = "https://escala-7gb.vercel.app/api"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def test_login_pin_invalido():
-    """Testa se o backend bloqueia tentativas de login com PIN errado."""
-    res = requests.post(f"{BASE_URL}/login", json={"pin": "000000"})
-    assert res.status_code in (401, 403), "O backend deveria recusar um PIN errado"
-    json_data = res.json()
-    assert json_data.get("ok") is False
-    assert "erro" in json_data or "tentativas" in json_data
+# Testes 100% offline: o handler real e exercitado com Supabase/HTTP mockados.
+# Nunca ha requisicao a URL de producao (evita incrementar LOGIN_TENTATIVAS).
 
-def test_push_sem_token():
-    """Testa se o backend recusa um envio de dados (push) sem token válido."""
-    res = requests.post(f"{BASE_URL}/push", json={"ops": [], "token": "token_falso_123"})
-    assert res.status_code == 401, "O backend deveria bloquear push sem token válido"
-    assert res.json().get("ok") is False
 
-def test_acesso_auditoria_sem_permissao():
-    """Testa se um usuário não logado consegue ver os logs de auditoria."""
-    # Tenta acessar a rota de logs sem enviar token
-    res = requests.post(f"{BASE_URL}/logs", json={"token": ""})
-    assert res.status_code == 401 or res.status_code == 403
-    assert res.json().get("ok") is False
+def _chamar(monkeypatch, metodo, corpo, usuarios=None, sessoes=None):
+    """Executa Handler.<metodo> com I/O mockado. Retorna (resposta, status, escritas)."""
+    import app as api_app
+
+    respostas, escritas = [], []
+
+    def fake_select(tabela, *a, **k):
+        if tabela == "usuarios":
+            return usuarios or []
+        if tabela == "sessoes":
+            return sessoes or []
+        return []
+
+    monkeypatch.setattr(api_app, "read_body", lambda h: corpo)
+    monkeypatch.setattr(api_app, "sb_select", fake_select)
+    monkeypatch.setattr(api_app, "sb_request", lambda m, t, **kw: escritas.append((m, t, kw)))
+    monkeypatch.setattr(api_app, "json_response", lambda h, c, status=200: respostas.append((c, status)))
+    h = object.__new__(api_app.Handler)
+    getattr(h, metodo)()
+    assert len(respostas) == 1
+    return respostas[0][0], respostas[0][1], escritas
+
+
+@pytest.fixture(autouse=True)
+def _sem_rede(monkeypatch):
+    import socket
+
+    def _bloqueia(*a, **k):
+        raise AssertionError("acesso a rede proibido nos testes offline")
+
+    monkeypatch.setattr(socket.socket, "connect", _bloqueia)
+
+
+def test_login_pin_invalido(monkeypatch):
+    """Backend recusa PIN errado e incrementa o contador apenas no mock local."""
+    corpo, status, escritas = _chamar(monkeypatch, "_login", {"pin": "000000"})
+    assert status in (401, 403), "O backend deveria recusar um PIN errado"
+    assert corpo.get("ok") is False
+    assert "erro" in corpo or "tentativas" in corpo
+    assert any(t == "propriedades" and kw["body"]["chave"] == "LOGIN_TENTATIVAS" for _, t, kw in escritas)
+
+
+def test_push_sem_token(monkeypatch):
+    """Backend recusa push sem token valido (sessao inexistente no mock)."""
+    corpo, status, escritas = _chamar(
+        monkeypatch, "_push", {"ops": [], "token": "token_falso_123"}, sessoes=[])
+    assert status == 401, "O backend deveria bloquear push sem token valido"
+    assert corpo.get("ok") is False
+    assert escritas == []
+
+
+def test_acesso_auditoria_sem_permissao(monkeypatch):
+    """Usuario sem token nao acessa os logs de auditoria."""
+    corpo, status, _ = _chamar(monkeypatch, "_get_logs", {"token": ""})
+    assert status in (401, 403)
+    assert corpo.get("ok") is False
+
 
 # ── Testes unitários (sem rede) — deduplicação do lote no /api/push ──────────
 import os
