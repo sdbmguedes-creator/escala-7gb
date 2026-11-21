@@ -1,8 +1,28 @@
+from concurrent.futures import ThreadPoolExecutor
 import os
 import json
+import threading
 import urllib.request
 import urllib.error
 import urllib.parse
+
+try:
+    import requests as _requests
+    _THREAD_LOCAL = threading.local()
+except Exception:
+    _requests = None
+    _THREAD_LOCAL = None
+
+
+def _get_http_session():
+    """Retorna uma requests.Session() isolada por thread (Session não é thread-safe)."""
+    if _requests is None or _THREAD_LOCAL is None:
+        return None
+    sess = getattr(_THREAD_LOCAL, "session", None)
+    if sess is None:
+        sess = _requests.Session()
+        _THREAD_LOCAL.session = sess
+    return sess
 
 
 def _get_supabase_config():
@@ -15,7 +35,7 @@ def _get_supabase_config():
     return url, key
 
 
-def sb_request(method, path, params=None, body=None, extra_headers=None):
+def sb_request(method, path, params=None, body=None, extra_headers=None, prefer="return=representation"):
     """Faz requisição REST para o Supabase."""
     supabase_url, supabase_key = _get_supabase_config()
     clean_path = path.lstrip("/")
@@ -28,15 +48,25 @@ def sb_request(method, path, params=None, body=None, extra_headers=None):
         "apikey": supabase_key,
         "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json",
-        "Prefer": "return=representation",
+        "Prefer": prefer,
     }
     if extra_headers:
         headers.update(extra_headers)
 
     data = json.dumps(body).encode("utf-8") if body is not None else None
 
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
+        http_session = _get_http_session()
+        if http_session is not None:
+            resp = http_session.request(method, url, headers=headers, data=data, timeout=15)
+            if resp.status_code == 204:
+                return None
+            txt = resp.text
+            if resp.status_code >= 400:
+                raise Exception(f"Supabase {resp.status_code}: {txt}")
+            return json.loads(txt) if txt else None
+
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=15) as r:
             if r.status == 204:
                 return None
@@ -48,7 +78,6 @@ def sb_request(method, path, params=None, body=None, extra_headers=None):
     except Exception as e:
         raise Exception(f"Erro ao contatar Supabase: {e}")
 
-
 def sb_select(path, filters=None, order=None, limit=None):
     """Busca linhas via PostgREST.
 
@@ -59,11 +88,19 @@ def sb_select(path, filters=None, order=None, limit=None):
     - limit=None       → pagina até esgotar (retorna tudo)
     - limit <= 1000    → single request (comportamento antigo)
     - limit > 1000     → pagina em lotes de 1000 até atingir `limit`
+
+    Operadores PostgREST suportados nos valores de `filters`:
+    gt., gte., lt., lte., like., ilike., in., is., not.
+    (não prefixar "eq." quando o valor já começa com operador).
     """
     base_params = {}
     if filters:
         for k, v in filters.items():
-            base_params[k] = f"eq.{v}"
+            s = str(v)
+            if s.startswith(("gt.", "gte.", "lt.", "lte.", "like.", "ilike.", "in.", "is.", "not.")):
+                base_params[k] = s
+            else:
+                base_params[k] = f"eq.{v}"
     if order:
         base_params["order"] = order
 
@@ -72,33 +109,58 @@ def sb_select(path, filters=None, order=None, limit=None):
         base_params["limit"] = str(limit)
         return sb_request("GET", path, params=base_params)
 
-    # Sem limite OU limite grande — pagina
+    # Sem limite OU limite grande — busca primeira página e paraleliza as seguintes
     page_size = 1000
-    offset = 0
-    todas = []
-    while True:
+
+    def _fetch_offset(off):
         params = dict(base_params)
         params["limit"] = str(page_size)
-        params["offset"] = str(offset)
-        lote = sb_request("GET", path, params=params) or []
-        todas.extend(lote)
-        if len(lote) < page_size:
-            break
-        offset += page_size
+        params["offset"] = str(off)
+        return sb_request("GET", path, params=params) or []
+
+    lote_inicial = _fetch_offset(0)
+    if len(lote_inicial) < page_size:
+        return lote_inicial[:limit] if limit is not None else lote_inicial
+
+    todas = list(lote_inicial)
+    offset = page_size
+    max_workers = 4
+
+    while True:
         if limit is not None and len(todas) >= limit:
-            todas = todas[:limit]
             break
+
+        offsets_lote = [offset + i * page_size for i in range(max_workers)]
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            resultados = list(pool.map(_fetch_offset, offsets_lote))
+
+        parou = False
+        for lote in resultados:
+            todas.extend(lote)
+            if len(lote) < page_size:
+                parou = True
+                break
+            if limit is not None and len(todas) >= limit:
+                parou = True
+                break
+
+        if parou:
+            break
+        offset += max_workers * page_size
+
+    if limit is not None and len(todas) > limit:
+        todas = todas[:limit]
     return todas
 
 
 def sb_upsert(path, rows):
     if not rows:
         return None
-    return sb_request("POST", path, body=rows)
+    return sb_request("POST", path, body=rows, prefer="return=minimal")
 
 
 def sb_delete(path, filters):
     params = {}
     for k, v in filters.items():
         params[k] = f"eq.{v}"
-    return sb_request("DELETE", path, params=params)
+    return sb_request("DELETE", path, params=params, prefer="return=minimal")

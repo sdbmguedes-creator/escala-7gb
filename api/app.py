@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler
+from concurrent.futures import ThreadPoolExecutor
 import os, sys, json, hashlib, uuid, datetime
 from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -9,6 +10,15 @@ from utils import json_response, read_body
 # ============================================================
 # Helpers compartilhados
 # ============================================================
+
+def dedup_rows(rows, chave):
+    """Remove linhas duplicadas pela chave de conflito, mantendo a ÚLTIMA.
+    Evita PostgreSQL 21000 (ON CONFLICT DO UPDATE afetando a mesma linha 2x)."""
+    vistos = {}
+    for r in rows:
+        vistos[tuple(str(r.get(c)) for c in chave)] = r
+    return list(vistos.values())
+
 
 def hash_pin(pin, salt):
     return hashlib.sha256((salt + str(pin)).encode("utf-8")).hexdigest()
@@ -52,15 +62,24 @@ def resolver_token(token):
     return {"perfil": s.get("perfil"), "nome": s.get("nome")}
 
 
+def _norm_secao(val):
+    return "".join(str(val or "").strip().upper().split())
+
 def pode_gravar(perfil, grupo, militar_id, elenco_map):
     if perfil in ("Admin", "Mestre"):
         return True
-    g = str(grupo)
-    if g == "ACO":
+    g = str(grupo or "").strip()
+    p_norm = _norm_secao(perfil)
+    if g.upper() == "ACO":
         m2 = elenco_map.get(militar_id)
-        return bool(m2 and str(m2.get("secao")) == str(perfil))
-    alvo = g[4:] if g.startswith("ADM:") else (g[5:] if g.startswith("host:") else g)
-    return alvo == perfil
+        return bool(m2 and _norm_secao(m2.get("secao")) == p_norm)
+    if g.upper().startswith("ADM:"):
+        alvo = g[4:]
+    elif g.lower().startswith("host:"):
+        alvo = g[5:]
+    else:
+        alvo = g
+    return _norm_secao(alvo) == p_norm
 
 
 PERFIS_VALIDOS = ["Admin", "Mestre", "1ªSB", "2ªSB", "3ªSB", "4ªSB"]
@@ -100,47 +119,59 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_estatico(self, arquivo):
         # Define o tipo correto para cada arquivo
         if arquivo.endswith(".json"):
-            content_type = "application/json"
+            content_type = "application/json; charset=utf-8"
         elif arquivo.endswith(".js"):
-            content_type = "application/javascript"
+            content_type = "application/javascript; charset=utf-8"
         elif arquivo.endswith(".png"):
             content_type = "image/png"
+        elif arquivo.endswith(".svg"):
+            content_type = "image/svg+xml"
         else:
             content_type = "application/octet-stream"
 
-        file_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            arquivo,
-        )
-        
-        try:
-            with open(file_path, "rb") as f:
-                corpo = f.read()
-        except FileNotFoundError:
+        raiz_projeto = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        nome_limpo = os.path.basename(arquivo)
+
+        candidatos = [
+            os.path.join(raiz_projeto, "frontend", nome_limpo),
+            os.path.join(raiz_projeto, nome_limpo),
+        ]
+
+        corpo = None
+        for caminho in candidatos:
+            if os.path.isfile(caminho):
+                with open(caminho, "rb") as f:
+                    corpo = f.read()
+                break
+
+        if corpo is None:
             self.send_response(404)
             self.end_headers()
             return
-            
+
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-cache")
+        if nome_limpo == "sw.js":
+            self.send_header("Service-Worker-Allowed", "/")
         self.send_header("Content-Length", str(len(corpo)))
         self.end_headers()
         self.wfile.write(corpo)
-
     # ---------- index ----------
     def _serve_index(self):
         html_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "frontend",
-        "index_v14.html",
-    )
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frontend",
+            "index_v14.html",
+        )
         try:
             with open(html_path, "r", encoding="utf-8") as f:
                 conteudo = f.read()
         except FileNotFoundError:
             json_response(self, {"ok": False, "erro": "index_v14.html nao encontrado"}, 404)
             return
+
         corpo = conteudo.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -148,6 +179,30 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(corpo)))
         self.end_headers()
         self.wfile.write(corpo)
+
+    def _serve_sw(self):
+        sw_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "frontend",
+            "sw.js",
+        )
+        if not os.path.isfile(sw_path):
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"sw.js not found")
+            return
+
+        with open(sw_path, "rb") as f:
+            conteudo = f.read()
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/javascript; charset=utf-8")
+        self.send_header("Content-Length", str(len(conteudo)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Service-Worker-Allowed", "/")
+        self.end_headers()
+        self.wfile.write(conteudo)
 
     # ---------- dispatch POST ----------
     def do_POST(self):
@@ -493,78 +548,110 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, {"ok": True})
 
     def _pull(self):
-        corpo = read_body(self)
-        competencia = corpo.get("competencia", "2026-11")[:7]
-        token = corpo.get("token", "")
+        try:
+            corpo = read_body(self)
+            competencia = corpo.get("competencia", "2026-11")[:7]
+            token = corpo.get("token", "")
+            desde_versao = corpo.get("desdeVersao")
+            if desde_versao is None:
+                desde_versao = corpo.get("versao")
 
-        u = resolver_token(token)
-        if not u:
-            json_response(self, {"ok": False, "erro": "token inválido"}, 401)
-            return
+            desde_quando = corpo.get("desdeQuando") or corpo.get("desde_quando")
+            try:
+                limite_mov = int(corpo.get("limiteMovimentos") or corpo.get("limite_movimentos") or 100)
+            except (ValueError, TypeError):
+                limite_mov = 100
+            limite_mov = max(1, min(500, limite_mov))
 
-        meta_rows = sb_select("meta", {"competencia": competencia}) or []
-        versao = meta_rows[0].get("versao", 0) if meta_rows else 0
-        extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
+            u = resolver_token(token)
+            if not u:
+                json_response(self, {"ok": False, "erro": "token inválido"}, 401)
+                return
 
-        # FIX B — nunca retornar payload vazio (semMudanca): frontend pode
-        # sobrescrever estado local com undefined. Retornamos sempre completo.
-        marcas = sb_select("marcas", {"competencia": competencia}) or []
-        marcas_out = [
-            {"g": m["grupo"], "i": m["militar_id"], "d": m["dia"], "c": m["codigo"]}
-            for m in marcas
-        ]
+            meta_rows = sb_select("meta", {"competencia": competencia}) or []
+            versao = meta_rows[0].get("versao", 0) if meta_rows else 0
 
-        comentarios = sb_select("comments", {"competencia": competencia}) or []
-        comentarios_out = [{"k": c["chave"], "v": c["texto"]} for c in comentarios]
+            if desde_versao is not None:
+                try:
+                    if int(desde_versao) == int(versao):
+                        json_response(self, {"ok": True, "semMudanca": True, "versao": versao})
+                        return
+                except (ValueError, TypeError):
+                    pass
 
-        elenco = sb_select("elenco", {"competencia": competencia}) or []
-        elenco_out = []
-        for e in elenco:
-            elenco_out.append({
-                "id": e["militar_id"],
-                "secao": e.get("secao", ""),
-                "escala": e.get("escala", ""),
-                "motorista": e.get("motorista", ""),
-                "adm": e.get("adm", ""),
-                "restricao": bool(e.get("restricao")),
-                "cotasAdm": int(e.get("cotas_adm") or 0),
-                "afast": e.get("afast_json") or [],
-                "escalaOrigem": e.get("escala_origem", ""),
-                "escalaOrigemAdm": e.get("escala_origem_adm", ""),
-            })
+            extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
 
-        aco_rows = sb_select("aco_oficiais", {"competencia": competencia}) or []
-        aco_oficiais = {}
-        for r in aco_rows:
-            aco_oficiais.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
+            filtros_mov = {"competencia": competencia}
+            if desde_quando:
+                filtros_mov["quando"] = f"gt.{desde_quando}"
+                ordem_mov = "quando.asc"
+            else:
+                ordem_mov = "quando.desc"
 
-        mov = sb_select("movimentos", {"competencia": competencia}) or []
-        movimentos = [
-            {
-                "quando":   m["quando"],
-                "tipo":     m["tipo"],
-                "origem":   m["origem"],
-                "destino":  m["destino"],
-                "qtd":      m["qtd"],
-                "motivo":   m["motivo"],
-                "autor":    m["autor"],
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                fut_marcas = pool.submit(lambda: sb_select("marcas", {"competencia": competencia}) or [])
+                fut_comments = pool.submit(lambda: sb_select("comments", {"competencia": competencia}) or [])
+                fut_elenco = pool.submit(lambda: sb_select("elenco", {"competencia": competencia}) or [])
+                fut_aco = pool.submit(lambda: sb_select("aco_oficiais", {"competencia": competencia}) or [])
+                fut_mov = pool.submit(lambda: sb_select("movimentos", filtros_mov, order=ordem_mov, limit=limite_mov) or [])
+
+                marcas = fut_marcas.result()
+                comentarios = fut_comments.result()
+                elenco = fut_elenco.result()
+                aco_rows = fut_aco.result()
+                mov = fut_mov.result()
+
+            marcas_out = [
+                {"g": m["grupo"], "i": m["militar_id"], "d": m["dia"], "c": m["codigo"]}
+                for m in marcas
+            ]
+
+            comentarios_out = [{"k": c["chave"], "v": c["texto"]} for c in comentarios]
+
+            elenco_out = []
+            for e in elenco:
+                adm_raw = e.get("adm", "")
+                adm_norm = "S" if (adm_raw is True or str(adm_raw or "").strip().upper() in ("S", "TRUE", "1", "SIM")) else ""
+                elenco_out.append({
+                    "id": e["militar_id"],
+                    "secao": e.get("secao", ""),
+                    "escala": e.get("escala", ""),
+                    "motorista": e.get("motorista", ""),
+                    "adm": adm_norm,
+                    "restricao": bool(e.get("restricao")),
+                    "cotasAdm": int(e.get("cotas_adm") or 0),
+                    "afast": e.get("afast_json") or [],
+                    "escalaOrigem": e.get("escala_origem", ""),
+                    "escalaOrigemAdm": e.get("escala_origem_adm", ""),
+                })
+
+            aco_oficiais = {}
+            for r in aco_rows:
+                aco_oficiais.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
+            movimentos = [
+                {
+                    "quando":   m["quando"],
+                    "tipo":     m["tipo"],
+                    "origem":   m["origem"],
+                    "destino":  m["destino"],
+                    "qtd":      m["qtd"],
+                    "motivo":   m["motivo"],
+                    "autor":    m["autor"],
+                }
+                for m in mov
+            ]
+
+            meta = {
+                "competencia": competencia,
+                "versao":      versao,
+                "status":      meta_rows[0].get("status", "ativa") if meta_rows else "ativa",
+                "params":      meta_rows[0].get("params_json") if meta_rows else None,
+                "vis":         extras.get("vis", {}),
+                "visLinhas":   extras.get("visLinhas", {}),
+                "aco":         extras.get("aco", []),
             }
-            for m in mov
-        ]
 
-        meta = {
-            "competencia": competencia,
-            "versao":      versao,
-            "status":      meta_rows[0].get("status", "ativa") if meta_rows else "ativa",
-            "params":      meta_rows[0].get("params_json") if meta_rows else None,
-            "vis":         extras.get("vis", {}),
-            "visLinhas":   extras.get("visLinhas", {}),
-            "aco":         extras.get("aco", []),
-        }
-
-        json_response(
-            self,
-            {
+            payload_pull = {
                 "ok":            True,
                 "versao":        versao,
                 "marcas":        marcas_out,
@@ -573,8 +660,18 @@ class Handler(BaseHTTPRequestHandler):
                 "acoOficiais":   aco_oficiais,
                 "movimentos":    movimentos,
                 "meta":          meta,
-            },
-        )
+            }
+            try:
+                tamanhos = {k: len(json.dumps(v, ensure_ascii=False).encode("utf-8")) for k, v in payload_pull.items() if k != "ok"}
+                print(f"[pull_diag] comp={competencia} tamanhos_bytes={tamanhos}")
+            except Exception:
+                pass
+            json_response(self, payload_pull)
+        except Exception as e:
+            msg = str(e)
+            print(f"[pull] erro: {msg}")
+            status_code = 400 if "Supabase 400:" in msg else 500
+            json_response(self, {"ok": False, "erro": msg}, status_code)
 
     def _push(self):
         try:
@@ -647,8 +744,19 @@ class Handler(BaseHTTPRequestHandler):
                 elif op["t"] == "marca":
                     k = op.get("k", "")
                     p = str(k).split("|")
+                    dia_int = None
+                    if len(p) >= 3 and p[2] not in (None, ""):
+                        raw_dia = str(p[2]).strip()
+                        if "-" in raw_dia:
+                            raw_dia = raw_dia.split("-")[-1]
+                        try:
+                            dia_int = int(raw_dia)
+                        except (ValueError, TypeError):
+                            dia_int = None
                     if len(p) < 3:
                         motivo = "chave de marca inválida"
+                    elif dia_int is None:
+                        motivo = f"dia inválido na chave de marca: {k}"
                     elif not pode_gravar(perfil, p[0], p[1], elenco_map):
                         motivo = f"perfil {perfil} não pode gravar em {p[0]}"
                     else:
@@ -657,7 +765,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "competencia": competencia,
                                 "grupo":       p[0],
                                 "militar_id":  p[1],
-                                "dia":         p[2],
+                                "dia":         dia_int,
                                 "codigo":      op["v"],
                                 "ts":          agora,
                                 "autor":       u["nome"],
@@ -776,10 +884,42 @@ class Handler(BaseHTTPRequestHandler):
                                 for k_db, v_db in elenco_map[mid].items():
                                     if k_db in base:
                                         base[k_db] = v_db
+                            def _to_bool(val, default=False):
+                                if isinstance(val, bool):
+                                    return val
+                                if val is None or val == "":
+                                    return default
+                                if isinstance(val, (int, float)):
+                                    return bool(val)
+                                s = str(val).strip().lower()
+                                if s in ("true", "1", "sim", "s", "yes", "y"):
+                                    return True
+                                if s in ("false", "0", "nao", "não", "n", "no"):
+                                    return False
+                                return default
+
                             for k_op, v_op in campos.items():
                                 alvo = MAPA_CAMPOS_FRONT.get(k_op)
                                 if alvo:
-                                    base[alvo] = v_op if v_op is not None else ([] if alvo == "afast_json" else "")
+                                    if alvo == "cotas_adm":
+                                        try:
+                                            base[alvo] = int(v_op) if v_op not in (None, "") else 0
+                                        except (ValueError, TypeError):
+                                            base[alvo] = 0
+                                    elif alvo in ("restricao", "adm"):
+                                        base[alvo] = _to_bool(v_op, default=False)
+                                    else:
+                                        base[alvo] = v_op if v_op is not None else ([] if alvo == "afast_json" else "")
+
+                            if "restricao" in base:
+                                base["restricao"] = _to_bool(base.get("restricao"), default=False)
+                            if "adm" in base:
+                                base["adm"] = _to_bool(base.get("adm"), default=False)
+
+                            try:
+                                base["cotas_adm"] = int(base.get("cotas_adm") or 0)
+                            except (ValueError, TypeError):
+                                base["cotas_adm"] = 0
 
                             secao_alvo = base.get("secao") or ""
                             if perfil not in ("Admin", "Mestre") and str(secao_alvo) != str(perfil):
@@ -794,13 +934,17 @@ class Handler(BaseHTTPRequestHandler):
                         motivo = "mov exige Admin ou Mestre"
                     else:
                         d = op.get("dados") or {}
+                        try:
+                            qtd_int = int(d.get("qtd") or 0)
+                        except (ValueError, TypeError):
+                            qtd_int = 0
                         sb_request("POST", "movimentos", body={
                             "competencia": competencia,
                             "quando": d.get("quando", ""),
                             "tipo": d.get("tipo", ""),
                             "origem": d.get("origem", ""),
                             "destino": d.get("destino", ""),
-                            "qtd": d.get("qtd", 0),
+                            "qtd": qtd_int,
                             "motivo": d.get("motivo", ""),
                             "autor": u["nome"],
                         })
@@ -859,7 +1003,7 @@ class Handler(BaseHTTPRequestHandler):
             if marcas_upsert:
                 sb_request(
                     "POST", "marcas",
-                    body=list(marcas_upsert.values()),
+                    body=dedup_rows(list(marcas_upsert.values()), ("competencia", "grupo", "militar_id", "dia")),
                     params={"on_conflict": "competencia,grupo,militar_id,dia"},
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
@@ -880,7 +1024,7 @@ class Handler(BaseHTTPRequestHandler):
             if comments_upsert:
                 sb_request(
                     "POST", "comments",
-                    body=list(comments_upsert.values()),
+                    body=dedup_rows(list(comments_upsert.values()), ("competencia", "chave")),
                     params={"on_conflict": "competencia,chave"},
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
@@ -893,7 +1037,7 @@ class Handler(BaseHTTPRequestHandler):
             if elenco_upsert:
                 sb_request(
                     "POST", "elenco",
-                    body=list(elenco_upsert.values()),
+                    body=dedup_rows(list(elenco_upsert.values()), ("competencia", "militar_id")),
                     params={"on_conflict": "competencia,militar_id"},  # PK == business key, mas explícito não machuca
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
@@ -907,7 +1051,7 @@ class Handler(BaseHTTPRequestHandler):
                     })
                 sb_request(
                     "POST", "aco_oficiais",
-                    body=aco_rows_out,
+                    body=dedup_rows(aco_rows_out, ("competencia", "dia", "turno")),
                     params={"on_conflict": "competencia,dia,turno"},
                     extra_headers={"Prefer": "resolution=merge-duplicates"},
                 )
@@ -938,8 +1082,10 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "versao": versao_final, "aplicadas": aplicadas, "recusadas": recusadas})
 
         except Exception as e:
-            print(f"[push] erro: {e}")
-            json_response(self, {"ok": False, "erro": str(e)}, 500)
+            msg = str(e)
+            print(f"[push] erro: {msg}")
+            status_code = 400 if "Supabase 400:" in msg else 500
+            json_response(self, {"ok": False, "erro": msg}, status_code)
 
     def _redefinir_pin(self):
         corpo = read_body(self)
