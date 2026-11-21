@@ -401,3 +401,95 @@ def test_push_apaga_marca_pelo_numero_do_dia(monkeypatch):
     )
     dels = [kw for m, t, kw in chamadas if m == "DELETE" and t == "marcas"]
     assert dels and dels[0]["params"]["dia"] == "eq.5"
+
+
+def test_push_concorrente_5_usuarios_preserva_deltas_e_incrementa_versao(monkeypatch):
+    """Simula 5 envios na mesma competência com estado persistente em memória."""
+    import app as api_app
+
+    db = {
+        "meta": [{"competencia": "2026-11", "status": "ativa", "params_json": None, "extras_json": {}, "versao": 1}],
+        "marcas": [],
+        "comments": [],
+        "elenco": [],
+        "aco_oficiais": [],
+        "logs_acesso": [],
+    }
+    usuarios_tok = {
+        "tok-adm": {"perfil": "Admin", "nome": "Cap Admin"},
+        "tok-1sb": {"perfil": "1ªSB", "nome": "Sgt Carpina"},
+        "tok-2sb": {"perfil": "2ªSB", "nome": "Sgt Goiana"},
+        "tok-3sb": {"perfil": "3ªSB", "nome": "Sgt Macaparana"},
+        "tok-4sb": {"perfil": "4ªSB", "nome": "Sgt Surubim"},
+    }
+
+    def fake_select(tabela, params=None, *a, **k):
+        rows = db.get(tabela, [])
+        if isinstance(params, dict) and "competencia" in params:
+            comp = params["competencia"]
+            return [dict(r) for r in rows if r.get("competencia") == comp]
+        return [dict(r) for r in rows]
+
+    def fake_request(metodo, tabela, body=None, params=None, **kw):
+        if metodo == "POST":
+            itens = body if isinstance(body, list) else [body]
+            if tabela == "marcas":
+                existentes = {(r["competencia"], r["grupo"], r["militar_id"], int(r["dia"])): r for r in db["marcas"]}
+                for item in itens:
+                    chave = (item["competencia"], item["grupo"], item["militar_id"], int(item["dia"]))
+                    existentes[chave] = dict(item)
+                db["marcas"] = list(existentes.values())
+            elif tabela == "meta":
+                comp = itens[0]["competencia"]
+                db["meta"] = [r for r in db["meta"] if r.get("competencia") != comp] + [dict(itens[0])]
+            elif tabela == "logs_acesso":
+                db["logs_acesso"].extend(dict(x) for x in itens)
+        elif metodo == "DELETE" and tabela == "marcas" and isinstance(params, dict):
+            comp = str(params.get("competencia", "")).removeprefix("eq.")
+            grp = str(params.get("grupo", "")).removeprefix("eq.")
+            mid = str(params.get("militar_id", "")).removeprefix("eq.")
+            dia = str(params.get("dia", "")).removeprefix("eq.")
+            db["marcas"] = [
+                r for r in db["marcas"]
+                if not (r["competencia"] == comp and r["grupo"] == grp and r["militar_id"] == mid and str(r["dia"]) == dia)
+            ]
+
+    monkeypatch.setattr(api_app, "resolver_token", lambda t: usuarios_tok.get(t))
+    monkeypatch.setattr(api_app, "sb_select", fake_select)
+    monkeypatch.setattr(api_app, "sb_request", fake_request)
+
+    lotes = [
+        ("tok-1sb", [{"t": "marca", "k": "1ªSB|707305-4|2026-11-05", "v": "X"}]),
+        ("tok-adm", [{"t": "marca", "k": "1ªSB|707305-4|2026-11-09", "v": "PJ"}]),
+        ("tok-2sb", [
+            {"t": "vis", "sb": "2ªSB", "lista": ["707155-8"], "linhas": 12},
+            {"t": "marca", "k": "host:2ªSB|707155-8|2026-11-12", "v": "PJ"},
+        ]),
+        ("tok-3sb", [{"t": "marca", "k": "3ªSB|707155-8|2026-11-07", "v": "X"}]),
+        ("tok-4sb", [{"t": "marca", "k": "4ªSB|704203-5|2026-11-08", "v": "F"}]),
+    ]
+
+    versoes = []
+    for tok, ops in lotes:
+        respostas = []
+        monkeypatch.setattr(api_app, "read_body", lambda h, tok=tok, ops=ops: {"competencia": "2026-11", "ops": ops, "token": tok})
+        monkeypatch.setattr(api_app, "json_response", lambda h, corpo, status=200, respostas=respostas: respostas.append((corpo, status)))
+        object.__new__(api_app.Handler)._push()
+        assert len(respostas) == 1
+        corpo, status = respostas[0]
+        assert status == 200
+        assert corpo["ok"] is True
+        assert corpo["recusadas"] == []
+        versoes.append(corpo["versao"])
+
+    assert versoes == [2, 3, 4, 5, 6]
+    assert db["meta"][0]["versao"] == 6
+    assert db["meta"][0]["extras_json"]["vis"]["2ªSB"] == ["707155-8"]
+    marcas_finais = {(r["grupo"], r["militar_id"], int(r["dia"])): r["codigo"] for r in db["marcas"]}
+    assert marcas_finais == {
+        ("1ªSB", "707305-4", 5): "X",
+        ("1ªSB", "707305-4", 9): "PJ",
+        ("host:2ªSB", "707155-8", 12): "PJ",
+        ("3ªSB", "707155-8", 7): "X",
+        ("4ªSB", "704203-5", 8): "F",
+    }
