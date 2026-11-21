@@ -53,7 +53,7 @@ describe('Multiusuario A/B na competencia 2026-11 (mock)', () => {
   });
 
   const irPara = ym => {
-    cy.get('#mesSel').clear().type(ym);
+    cy.get('#mesSel').invoke('val', ym).trigger('change');
     cy.wrap(null).should(() => {
       expect(pulls.some(p => p.ym === ym)).to.eq(true);
     });
