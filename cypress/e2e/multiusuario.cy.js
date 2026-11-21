@@ -1,4 +1,4 @@
-﻿// Ciclo completo multiusuario no navegador, sem rede externa:
+// Ciclo completo multiusuario no navegador, sem rede externa:
 // login -> pull -> edicao (Usuario A) -> push -> Usuario B grava no servidor ->
 // pull -> troca 2026-11 -> 2026-10 -> 2026-11, sem fila fantasma.
 const YM = '2026-11';
