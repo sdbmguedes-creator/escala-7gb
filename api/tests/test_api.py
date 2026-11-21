@@ -219,3 +219,149 @@ def test_get_raiz_retorna_html():
     assert tag_regras in body
     assert tag_sync in body
     assert body.index(tag_storage) < body.index(tag_regras) < body.index(tag_sync)
+
+
+def _rodar_push_ctx(monkeypatch, ops, perfil="Admin", nome="Adm", meta_rows=None, marcas_rows=None):
+    import app as api_app
+
+    chamadas = []
+    respostas = []
+    monkeypatch.setattr(api_app, "read_body", lambda h: {"competencia": "2026-11", "ops": ops, "token": "t"})
+    monkeypatch.setattr(api_app, "resolver_token", lambda t: {"perfil": perfil, "nome": nome})
+
+    def fake_select(tabela, *a, **k):
+        if tabela == "meta":
+            return meta_rows if meta_rows is not None else []
+        if tabela == "marcas":
+            return marcas_rows if marcas_rows is not None else []
+        return []
+
+    monkeypatch.setattr(api_app, "sb_select", fake_select)
+    monkeypatch.setattr(api_app, "pode_gravar", lambda *a, **k: True)
+    monkeypatch.setattr(api_app, "sb_request", lambda metodo, tabela, **kw: chamadas.append((metodo, tabela, kw)))
+    monkeypatch.setattr(api_app, "json_response", lambda h, corpo, status=200: respostas.append((corpo, status)))
+    h = object.__new__(api_app.Handler)
+    h._push()
+    return chamadas, respostas
+
+
+def test_push_em_competencia_fechada_retorna_423_sem_escritas(monkeypatch):
+    meta = [{"versao": 3, "status": "ativa", "extras_json": {"fechada": True}}]
+    chamadas, respostas = _rodar_push_ctx(
+        monkeypatch,
+        [{"t": "marca", "k": "1ªSB|1|5", "v": "X"}],
+        perfil="Mestre",
+        meta_rows=meta,
+    )
+    assert respostas and respostas[0][1] == 423
+    assert respostas[0][0]["ok"] is False
+    assert respostas[0][0]["fechada"] is True
+    assert chamadas == []
+
+
+def test_push_reabrir_competencia_exige_admin_e_lote_puro(monkeypatch):
+    meta = [{"versao": 3, "status": "ativa", "extras_json": {"fechada": True}}]
+    c1, r1 = _rodar_push_ctx(
+        monkeypatch, [{"t": "fechamento", "fechada": False}], perfil="Mestre", meta_rows=meta
+    )
+    assert r1[0][1] == 423 and c1 == []
+
+    c2, r2 = _rodar_push_ctx(
+        monkeypatch,
+        [{"t": "fechamento", "fechada": False}, {"t": "marca", "k": "1ªSB|1|5", "v": "X"}],
+        perfil="Admin",
+        meta_rows=meta,
+    )
+    assert r2[0][1] == 423 and c2 == []
+
+    c3, r3 = _rodar_push_ctx(
+        monkeypatch, [{"t": "fechamento", "fechada": False}], perfil="Admin", meta_rows=meta
+    )
+    assert r3[0][1] == 200 and r3[0][0]["ok"] is True
+    meta_posts = [kw["body"] for m, t, kw in c3 if m == "POST" and t == "meta"]
+    assert meta_posts and meta_posts[0]["extras_json"]["fechada"] is False
+    logs_posts = [kw["body"] for m, t, kw in c3 if m == "POST" and t == "logs_acesso"]
+    assert any(l["acao"] == "reabrir_competencia" for l in logs_posts)
+
+
+def test_fechar_competencia_apenas_admin(monkeypatch):
+    c_mestre, r_mestre = _rodar_push_ctx(
+        monkeypatch, [{"t": "fechamento", "fechada": True}], perfil="Mestre"
+    )
+    assert r_mestre[0][1] == 200
+    assert r_mestre[0][0]["aplicadas"] == 0
+    assert r_mestre[0][0]["recusadas"]
+    assert not any(t == "meta" for _, t, _ in c_mestre)
+
+    c_adm, r_adm = _rodar_push_ctx(
+        monkeypatch, [{"t": "fechamento", "fechada": True}], perfil="Admin"
+    )
+    assert r_adm[0][1] == 200
+    assert r_adm[0][0]["aplicadas"] == 1
+    meta_posts = [kw["body"] for m, t, kw in c_adm if m == "POST" and t == "meta"]
+    assert meta_posts and meta_posts[0]["extras_json"]["fechada"] is True
+    logs_posts = [kw["body"] for m, t, kw in c_adm if m == "POST" and t == "logs_acesso"]
+    assert any(l["acao"] == "fechar_competencia" for l in logs_posts)
+
+
+def test_push_registra_log_edicao_anterior_e_novo(monkeypatch):
+    import json
+    marcas = [{"competencia": "2026-11", "grupo": "1ªSB", "militar_id": "1", "dia": 5, "codigo": "X"}]
+    chamadas, respostas = _rodar_push_ctx(
+        monkeypatch,
+        [{"t": "marca", "k": "1ªSB|1|5", "v": "F"}],
+        perfil="Admin",
+        nome="Cap Silva",
+        marcas_rows=marcas,
+    )
+    assert respostas[0][1] == 200
+    logs = [kw["body"] for m, t, kw in chamadas if m == "POST" and t == "logs_acesso"]
+    edicoes = [l for l in logs if l["acao"] == "edicao"]
+    assert len(edicoes) == 1
+    det = json.loads(edicoes[0]["detalhes"])
+    assert det == {"competencia": "2026-11", "grupo": "1ªSB", "militar_id": "1", "dia": 5, "de": "X", "para": "F"}
+
+
+def test_get_logs_filtra_por_competencia(monkeypatch):
+    import json
+    import app as api_app
+
+    respostas = []
+    monkeypatch.setattr(api_app, "read_body", lambda h: {"token": "t", "competencia": "2026-11"})
+    monkeypatch.setattr(api_app, "resolver_token", lambda t: {"perfil": "Mestre", "nome": "M"})
+    monkeypatch.setattr(api_app, "sb_select", lambda *a, **k: [
+        {"acao": "edicao", "detalhes": json.dumps({"competencia": "2026-11", "de": "X", "para": "F"})},
+        {"acao": "edicao", "detalhes": json.dumps({"competencia": "2026-10", "de": "", "para": "X"})},
+        {"acao": "login", "detalhes": ""},
+    ])
+    monkeypatch.setattr(api_app, "json_response", lambda h, c, status=200: respostas.append((c, status)))
+    h = object.__new__(api_app.Handler)
+    h._get_logs()
+    assert respostas[0][1] == 200
+    logs = respostas[0][0]["logs"]
+    assert len(logs) == 1
+    assert '"2026-11"' in logs[0]["detalhes"]
+
+
+def test_pull_retorna_flag_fechada_em_meta(monkeypatch):
+    import app as api_app
+
+    respostas = []
+    monkeypatch.setattr(api_app, "read_body", lambda h: {"competencia": "2026-11", "token": "t", "desdeVersao": ""})
+    monkeypatch.setattr(api_app, "resolver_token", lambda t: {"perfil": "Admin", "nome": "Adm"})
+    monkeypatch.setattr(
+        api_app,
+        "sb_select",
+        lambda tabela, *a, **k: (
+            [{"versao": 2, "status": "ativa", "extras_json": {"fechada": True, "fechada_por": "Adm"}}]
+            if tabela == "meta"
+            else []
+        ),
+    )
+    monkeypatch.setattr(api_app, "json_response", lambda h, corpo, status=200: respostas.append((corpo, status)))
+    h = object.__new__(api_app.Handler)
+    h._pull()
+    assert respostas[0][1] == 200
+    assert respostas[0][0]["meta"]["fechada"] is True
+    assert respostas[0][0]["meta"]["fechadaPor"] == "Adm"
+

@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars */
 /* global D, COD, SBS, ORDEM_ESC, MES_BASE, marks, comments, vis, aco,
-   afastMesclado, autoX, statusMes, invalidarCachePessoas,
+   afastMesclado, autoX, statusMes, competenciaFechada, fechadaPor, fechadaEm,
+   invalidarCachePessoas,
    reconstruirIndiceMarcas, expurgarHostDuplicados, limparOrfas,
    migrarAdmSemEscala, normalizarAfastamentos, construirElencoNovo,
    avisosLegado, ehMestre, status, desenhar, dataBR, mesAnoBR,
@@ -30,6 +31,9 @@ function estadoSalvavel(){
     ordemPessoas:ordemPessoasAtual(),
     autoX:autoX,
     statusMes:statusMes,
+    competenciaFechada:!!competenciaFechada,
+    fechadaPor:fechadaPor||"",
+    fechadaEm:fechadaEm||"",
     snapshot:D.snapshot,
     movimentos:movsLeves
   };
@@ -51,6 +55,9 @@ function aplicarEstado(j){
   afastMesclado = !!j.afastMesclado;
   if (j.autoX !== undefined) autoX = !!j.autoX;
   statusMes = j.statusMes || "ativa";
+  competenciaFechada = !!j.competenciaFechada;
+  fechadaPor = j.fechadaPor || "";
+  fechadaEm = j.fechadaEm || "";
   D.snapshot = j.snapshot || null;
   D.movimentos = j.movimentos || [];
   if (j.params){
