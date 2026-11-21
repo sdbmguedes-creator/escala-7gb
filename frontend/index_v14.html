@@ -1048,17 +1048,6 @@ function _carregarEstado(){
   if (_migrou) { try{ salvarLocal(true); }catch(e){ console.error("[escala7gb] salvar pós-migração", e); } }
   if (msgNovoMes) alert(msgNovoMes);
   avisosLegado();
-  // PARTE 3 — hook de carga do backend. Dead code enquanto Sync.ligado=false.
-  if (typeof Sync !== "undefined" && Sync.ligado && typeof Sync.pullSync === "function"){
-    try{
-      const remoto = Sync.pullSync(String(D.competencia).slice(0,7));
-      if (remoto && remoto.estado){
-        aplicarOps(remoto.ops || []);
-        _ultimoSync[String(D.competencia).slice(0,7)] = JSON.parse(JSON.stringify(estadoSalvavel()));
-        desenhar();
-      }
-    }catch(e){ console.error("[escala7gb] Sync.pullSync", e); }
-  }
 }
 
 // ===== 6. REGRAS DE NEGÓCIO (escala, afastamento, saldos, cotas) =====
