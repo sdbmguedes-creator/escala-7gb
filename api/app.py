@@ -65,6 +65,17 @@ def resolver_token(token):
 def _norm_secao(val):
     return "".join(str(val or "").strip().upper().split())
 
+def dia_iso(competencia, dia):
+    """Normaliza o dia de uma marca para a chave que o frontend usa (AAAA-MM-DD).
+    O banco guarda só o número do dia (ver _push); sem esta conversão o pull
+    devolvia chaves 'grupo|id|5' que nunca casam com 'grupo|id|2026-11-05'
+    e as marcas sumiam do tela após logoff/login/F5."""
+    raw = str(dia if dia is not None else "").strip()
+    if raw.isdigit():
+        return f"{str(competencia)[:7]}-{int(raw):02d}"
+    return raw
+
+
 def pode_gravar(perfil, grupo, militar_id, elenco_map):
     if perfil in ("Admin", "Mestre"):
         return True
@@ -602,7 +613,7 @@ class Handler(BaseHTTPRequestHandler):
                 mov = fut_mov.result()
 
             marcas_out = [
-                {"g": m["grupo"], "i": m["militar_id"], "d": m["dia"], "c": m["codigo"]}
+                {"g": m["grupo"], "i": m["militar_id"], "d": dia_iso(competencia, m["dia"]), "c": m["codigo"]}
                 for m in marcas
             ]
 
@@ -696,7 +707,7 @@ class Handler(BaseHTTPRequestHandler):
             marcas_rows = sb_select("marcas", {"competencia": competencia}) or []
             marcas_map = {}
             for m in marcas_rows:
-                marcas_map[f"{m['grupo']}|{m['militar_id']}|{m['dia']}"] = m
+                marcas_map[f"{m['grupo']}|{m['militar_id']}|{dia_iso(competencia, m['dia'])}"] = m
 
             comentarios_rows = sb_select("comments", {"competencia": competencia}) or []
             comentarios_map = {}
@@ -783,10 +794,11 @@ class Handler(BaseHTTPRequestHandler):
                     elif not pode_gravar(perfil, p[0], p[1], elenco_map):
                         motivo = f"perfil {perfil} não pode gravar em {p[0]}"
                     else:
-                        anterior = (marcas_map.get(k) or {}).get("codigo", "")
+                        kn = f"{p[0]}|{p[1]}|{dia_iso(competencia, p[2])}"
+                        anterior = (marcas_map.get(kn) or marcas_map.get(k) or {}).get("codigo", "")
                         novo = op.get("v") if op.get("v") not in (None, "") else ""
                         if op.get("v") not in (None, ""):
-                            marcas_map[k] = {
+                            marcas_map[kn] = {
                                 "competencia": competencia,
                                 "grupo":       p[0],
                                 "militar_id":  p[1],
@@ -795,12 +807,12 @@ class Handler(BaseHTTPRequestHandler):
                                 "ts":          agora,
                                 "autor":       u["nome"],
                             }
-                            marcas_upsert[k] = marcas_map[k]
+                            marcas_upsert[k] = marcas_map[kn]
                             if k in marcas_deletar:
                                 marcas_deletar.remove(k)
                         else:
-                            if k in marcas_map:
-                                del marcas_map[k]
+                            if kn in marcas_map:
+                                del marcas_map[kn]
                                 deletadas += 1
                             marcas_upsert.pop(k, None)
                             if k not in marcas_deletar:
@@ -1057,13 +1069,21 @@ class Handler(BaseHTTPRequestHandler):
             for k_del in marcas_deletar:
                 partes = str(k_del).split("|")
                 if len(partes) == 3:
+                    # O banco guarda o número do dia (mesmo formato do upsert).
+                    dia_del = str(partes[2]).strip()
+                    if "-" in dia_del:
+                        dia_del = dia_del.split("-")[-1]
+                    try:
+                        dia_del = str(int(dia_del))
+                    except (ValueError, TypeError):
+                        pass
                     sb_request(
                         "DELETE", "marcas",
                         params={
                             "competencia": f"eq.{competencia}",
                             "grupo":       f"eq.{partes[0]}",
                             "militar_id":  f"eq.{partes[1]}",
-                            "dia":         f"eq.{partes[2]}",
+                            "dia":         f"eq.{dia_del}",
                         },
                     )
 

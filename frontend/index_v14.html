@@ -4618,7 +4618,18 @@ function sair(){
   if (!Transport.disponivel()) return;
   if (!Sessao.token){ Sessao.limpar(); location.reload(); return; }
   if (!confirm("Sair da sessão neste navegador?")) return;
-  Transport.call("apiLogout", [Sessao.token])
+  // Antes de invalidar o token, envia o que ainda está na fila (o push é
+  // adiado 1,5 s): sem isto as marcas recentes eram descartadas no logoff.
+  var drenar = Promise.resolve();
+  if (Sync.ligado){
+    if (Sync.timer){ clearTimeout(Sync.timer); Sync.timer = null; }
+    drenar = Promise.resolve(Sync._flushEmAndamento)
+      .catch(function(){})
+      .then(function(){ return Sync.fila.length ? Sync.flush(true) : null; });
+  }
+  var limite = new Promise(function(res){ setTimeout(res, 8000); });
+  Promise.race([drenar.catch(function(){}), limite])
+    .then(function(){ return Transport.call("apiLogout", [Sessao.token]); })
     .catch(function(){ /* mesmo se falhar, limpa o local */ })
     .then(function(){
       Sessao.limpar();

@@ -365,3 +365,39 @@ def test_pull_retorna_flag_fechada_em_meta(monkeypatch):
     assert respostas[0][0]["meta"]["fechada"] is True
     assert respostas[0][0]["meta"]["fechadaPor"] == "Adm"
 
+
+
+def test_pull_devolve_dia_da_marca_como_chave_iso(monkeypatch):
+    """Banco guarda só o número do dia; o pull devolve AAAA-MM-DD (chave do frontend)."""
+    import app as api_app
+
+    respostas = []
+    monkeypatch.setattr(api_app, "read_body", lambda h: {"competencia": "2026-11", "token": "t"})
+    monkeypatch.setattr(api_app, "resolver_token", lambda t: {"perfil": "Admin", "nome": "Adm"})
+
+    def fake_select(tabela, *a, **k):
+        if tabela == "meta":
+            return [{"versao": 3, "status": "ativa", "extras_json": {}}]
+        if tabela == "marcas":
+            return [
+                {"grupo": "1ªSB", "militar_id": "1", "dia": 5, "codigo": "X"},
+                {"grupo": "1ªSB", "militar_id": "2", "dia": "7", "codigo": "F"},
+                {"grupo": "1ªSB", "militar_id": "3", "dia": "2026-11-09", "codigo": "N"},
+            ]
+        return []
+
+    monkeypatch.setattr(api_app, "sb_select", fake_select)
+    monkeypatch.setattr(api_app, "json_response", lambda h, c, status=200: respostas.append((c, status)))
+    object.__new__(api_app.Handler)._pull()
+    dias = {m["i"]: m["d"] for m in respostas[0][0]["marcas"]}
+    assert dias == {"1": "2026-11-05", "2": "2026-11-07", "3": "2026-11-09"}
+
+
+def test_push_apaga_marca_pelo_numero_do_dia(monkeypatch):
+    chamadas, _ = _rodar_push_ctx(
+        monkeypatch,
+        [{"t": "marca", "k": "1ªSB|1|2026-11-05", "v": "", "ts": 1}],
+        marcas_rows=[{"grupo": "1ªSB", "militar_id": "1", "dia": 5, "codigo": "X"}],
+    )
+    dels = [kw for m, t, kw in chamadas if m == "DELETE" and t == "marcas"]
+    assert dels and dels[0]["params"]["dia"] == "eq.5"

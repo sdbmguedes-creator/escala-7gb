@@ -606,9 +606,23 @@ var Sessao = {
    Traz o estado do servidor para o cliente. O servidor passa a ser a fonte
    das marcas; o cadastro (elenco) continua local por enquanto.
    ========================================================================== */
+/* O servidor guarda só o número do dia; a chave local é AAAA-MM-DD.
+   Sem normalizar, 'grupo|id|5' nunca casa com 'grupo|id|2026-11-05' e as
+   marcas somem após o pull (logoff/login/F5). */
+function diaMarcaISO(ym, d){
+  var raw = String(d == null ? "" : d).trim();
+  return /^\d+$/.test(raw) ? (String(ym).slice(0, 7) + "-" + ("0" + parseInt(raw, 10)).slice(-2)) : raw;
+}
+
 function estadoDoServidor(p){
   var mk = {}, cm = {};
-  (p.marcas || []).forEach(function(m){ mk[m.g + "|" + m.i + "|" + m.d] = m.c; });
+  var ymP = (p.meta && p.meta.competencia) || (typeof D !== "undefined" && D.competencia) || "";
+  var curtas = [];
+  (p.marcas || []).forEach(function(m){
+    var iso = diaMarcaISO(ymP, m.d), k = m.g + "|" + m.i + "|" + iso;
+    if (iso !== String(m.d)) curtas.push([k, m.c]); else mk[k] = m.c;
+  });
+  curtas.forEach(function(x){ if (!(x[0] in mk)) mk[x[0]] = x[1]; });
   (p.comments || []).forEach(function(c){ cm[c.k] = c.v; });
   return {
     marks: mk,
