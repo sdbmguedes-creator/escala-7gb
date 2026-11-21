@@ -1089,11 +1089,13 @@ describe('Polling e Sincronização - Testes Preventivos', () => {
   });
 });
 
-describe('Fila fantasma e coalescência (código real de index_v14.html)', () => {
+describe('Fila fantasma e coalescência (código real de index_v14.html + sync.js)', () => {
   const html = fs.readFileSync(path.resolve(__dirname, '../../frontend/index_v14.html'), 'utf8');
-  const helpers = html.split('/* @@sync-helpers-begin */')[1].split('/* @@sync-helpers-end */')[0];
+  const syncJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/sync.js'), 'utf8');
+  const codigo = html + '\n' + syncJs;
+  const helpers = codigo.split('/* @@sync-helpers-begin */')[1].split('/* @@sync-helpers-end */')[0];
   const { opsDeGravacao, coalescerOps } = new Function(helpers + '; return { opsDeGravacao, coalescerOps };')();
-  const enfSrc = html.match(/enfileirar: function\(ym, ops\)\{[\s\S]*?\r?\n  \},\r?\n/)[0].replace(/,\s*$/, '');
+  const enfSrc = codigo.match(/enfileirar: function\(ym, ops\)\{[\s\S]*?\r?\n  \},\r?\n/)[0].replace(/,\s*$/, '');
   const novoSync = () => {
     const Sync = { ligado: true, fila: [], suprimir: 0, guardarFila: vi.fn(), agendar: vi.fn() };
     Sync.enfileirar = new Function('Sync', 'coalescerOps', 'return {' + enfSrc + '}.enfileirar;')(Sync, coalescerOps);
@@ -1163,19 +1165,21 @@ describe('Fila fantasma e coalescência (código real de index_v14.html)', () =>
   });
 
   it('Sync.flush aguarda flush em andamento e atualiza versaoPorYm em incremento sequencial', () => {
-    expect(html).toContain('if (Sync.estado === "enviando" && Sync._flushEmAndamento) return Sync._flushEmAndamento;');
-    expect(html).toContain('if (vAnt == null || Number(r.versao) === Number(vAnt) + 1)');
-    expect(html).toContain('if (String(D.competencia).slice(0, 7) !== ym) return;');
-    expect(html).toContain('if (String(D.competencia).slice(0, 7) !== ym) return false;');
+    expect(codigo).toContain('if (Sync.estado === "enviando" && Sync._flushEmAndamento) return Sync._flushEmAndamento;');
+    expect(codigo).toContain('if (vAnt == null || Number(r.versao) === Number(vAnt) + 1)');
+    expect(codigo).toContain('if (String(D.competencia).slice(0, 7) !== ym) return;');
+    expect(codigo).toContain('if (String(D.competencia).slice(0, 7) !== ym) return false;');
   });
 });
 
-describe('Multiusuário (A e B) na competência 2026-11 — código real de index_v14.html', () => {
+describe('Multiusuário (A e B) na competência 2026-11 — código real de index_v14.html + sync.js', () => {
   const html = fs.readFileSync(path.resolve(__dirname, '../../frontend/index_v14.html'), 'utf8');
-  const helpers = html.split('/* @@sync-helpers-begin */')[1].split('/* @@sync-helpers-end */')[0];
+  const syncJs = fs.readFileSync(path.resolve(__dirname, '../../frontend/sync.js'), 'utf8');
+  const codigo = html + '\n' + syncJs;
+  const helpers = codigo.split('/* @@sync-helpers-begin */')[1].split('/* @@sync-helpers-end */')[0];
   const { opsDeGravacao, coalescerOps } = new Function(helpers + '; return { opsDeGravacao, coalescerOps };')();
-  const enfSrc = html.match(/enfileirar: function\(ym, ops\)\{[\s\S]*?\r?\n  \},\r?\n/)[0].replace(/,\s*$/, '');
-  const reaplicarSrc = html.match(/function reaplicarFilaPendenteLocal\(ym\)\{[\s\S]*?\r?\n\}\r?\n/)[0];
+  const enfSrc = codigo.match(/enfileirar: function\(ym, ops\)\{[\s\S]*?\r?\n  \},\r?\n/)[0].replace(/,\s*$/, '');
+  const reaplicarSrc = codigo.match(/function reaplicarFilaPendenteLocal\(ym\)\{[\s\S]*?\r?\n\}\r?\n/)[0];
   const reaplicar = new Function('ctx', 'with(ctx){' + reaplicarSrc + '; return reaplicarFilaPendenteLocal;}');
   const diffMarcas = (antes, depois) => {
     const ks = new Set([...Object.keys(antes.marks), ...Object.keys(depois.marks)]);
