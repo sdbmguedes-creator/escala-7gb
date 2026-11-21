@@ -1385,6 +1385,8 @@ const Sync = {
   timer: null,
   estado: "offline",     // offline | ok | enviando
   versaoPorYm: {},       // versao por competência (ym)
+  _ultimoPushPorYm: {},  // timestamp do último push concluído por competência
+  _flushEmAndamento: null,
   suprimir: 0,           // >0 durante carga/pull/migração: enfileirar é no-op
   recusadas: null,
 
@@ -1436,8 +1438,8 @@ const Sync = {
 
   flush: async function(forcar){
     if (!Sync.pullInicialConcluido && !forcar) return;
+    if (Sync.estado === "enviando" && Sync._flushEmAndamento) return Sync._flushEmAndamento;
     if (!Sync.ligado || !Sync.fila.length) return;
-    if (Sync.estado === "enviando") return;
     if (Sync.estado === "erro-fatal") return;   // só destrava via descartarFila()/manual
 
     Sync.estado = "enviando"; Sync.pintar();
@@ -1445,6 +1447,7 @@ const Sync = {
     var lote = Sync.fila.slice();
     Sync.fila = [];                     // otimista: esvazia e devolve se falhar
 
+    var p = (async function(){
     try{
       var porMes = {};
       lote.forEach(function(it){ porMes[it.ym] = (porMes[it.ym] || []).concat(it.ops); });
@@ -1484,8 +1487,15 @@ const Sync = {
           console.warn("[sync] recusadas:", r.recusadas);
           mostrarRecusas();
         }
-        // Push pode conter ops de várias competências; a versão retornada é ambígua.
-        // Não armazenamos globalmente; cada competência atualiza sua versão no próximo pull.
+        Sync._ultimoPushPorYm[ym] = Date.now();
+        // Atualiza a versão da competência quando o incremento veio só do nosso push
+        // (evita que o próximo pull ache que "outro usuário gravou" e re-aplique).
+        if (r.versao != null) {
+          var vAnt = Sync.versaoPorYm[ym];
+          if (vAnt == null || Number(r.versao) === Number(vAnt) + 1) {
+            Sync.versaoPorYm[ym] = r.versao;
+          }
+        }
       }
       Sync.estado = "ok";
       console.log("[sync] push ok — versao", r.versao);
@@ -1493,9 +1503,14 @@ const Sync = {
       Sync.fila = lote.concat(Sync.fila);   // devolve tudo
       Sync.estado = "offline";
       console.error("[sync] push falhou:", e && e.message || e);
+    } finally {
+      Sync._flushEmAndamento = null;
     }
 
     Sync.guardarFila();
+    })();
+    Sync._flushEmAndamento = p;
+    return p;
   },
 
   /** Descarta a fila local. Use quando um lote inválido ficar preso. */
@@ -5595,16 +5610,16 @@ function mudarCompetencia(v){
     // entre meses. Apenas garante que o polling seja agendado para a nova competência.
     if (typeof Sync !== "undefined" && Sync.ligado && typeof sincronizarMes === "function") {
       sincronizarMes(v).then(function(ok){
-        if (ok) {
+        if (ok && String(D.competencia).slice(0,7) === v) {
           carregarEstado();
           desenhar();
         }
-        if (typeof agendarPoll === "function") agendarPoll(v);
+        if (typeof agendarPoll === "function" && String(D.competencia).slice(0,7) === v) agendarPoll(v);
       });
     }
   }
 
-  if (temFilaPendente && Sync.ligado && typeof Sync.flush === "function"){
+  if ((temFilaPendente || (Sync && Sync.estado === "enviando")) && Sync.ligado && typeof Sync.flush === "function"){
     Sync.flush(true).then(function(){
       prosseguir();
     }).catch(function(){
@@ -5888,19 +5903,20 @@ function _aplicarRemoto(remoto, ym){
   if (remoto.elenco && remoto.elenco.length) {
     if (!D.mes) D.mes = [];
     remoto.elenco.forEach(function(rem) {
+      var admNorm = (rem.adm === true || String(rem.adm || "").trim().toUpperCase() === "S") ? "S" : "";
       var loc = D.mes.find(function(x) { return x.id === rem.id; });
       if (loc) {
         loc.secao = rem.secao;
         loc.escala = rem.escala;
         loc.motorista = rem.motorista;
-        loc.adm = rem.adm;
+        loc.adm = admNorm;
         loc.restricao = rem.restricao;
         loc.cotasAdm = rem.cotasAdm;
         loc.afast = rem.afast;
         loc.escalaOrigem = rem.escalaOrigem;
         loc.escalaOrigemAdm = rem.escalaOrigemAdm;
       } else {
-        D.mes.push(rem);
+        D.mes.push(Object.assign({}, rem, { adm: admNorm }));
       }
     });
   } else {
@@ -5950,26 +5966,31 @@ async function atualizarDoServidor(ym){
     return Promise.resolve(false);
   }
 
+  var tsInicioPull = Date.now();
   var versaoAtual = Sync.versaoPorYm[ym] || null;
-  var ultimaRemota = _ultimaRemotaPorYm[ym] || 0;
 
   var promessa = (async function(){
     try {
       var ultimoMov = (D.movimentos && D.movimentos.length) ? D.movimentos[D.movimentos.length - 1].quando : null;
       var r = await Transport.call("apiPull", [ym, Sessao.token, versaoAtual, ultimoMov]).catch(function(){ return null; });
       if (!r || !r.ok) return;
+      if (String(D.competencia).slice(0, 7) !== ym) return;
       if (r.semMudanca){
-        if (r.versao != null && (versaoAtual == null || r.versao > versaoAtual)) Sync.versaoPorYm[ym] = r.versao;
+        var vNow = Sync.versaoPorYm[ym] || null;
+        if (r.versao != null && (vNow == null || r.versao > vNow)) Sync.versaoPorYm[ym] = r.versao;
         return;
       }
       if (Sync.estado === "enviando" || Sync.fila.length) return;
+      if (_ultimaInteracao > tsInicioPull || (Sync._ultimoPushPorYm && Sync._ultimoPushPorYm[ym] > tsInicioPull)) return;
       if (!r.marcas) return;
-      // FIX RACE: comparar com versaoAtual ATUAL, não com cópia capturada antes
+      // FIX RACE: comparar com Sync.versaoPorYm[ym] ATUAL, não com cópia capturada antes
       // do await. Se um push local rodou durante o pull, aplicar esse payload
       // regride o estado → tela pisca, marcas "voltam". Regra: só aceita
       // payload ESTRITAMENTE mais novo. Respostas atrasadas são descartadas.
-      if (versaoAtual !== null && r.versao < versaoAtual) return;
-      if (ultimaRemota > 0 && r.versao === versaoAtual) return;
+      var versaoAgora = Sync.versaoPorYm[ym] || null;
+      var ultimaRemota = _ultimaRemotaPorYm[ym] || 0;
+      if (versaoAgora !== null && r.versao < versaoAgora) return;
+      if (ultimaRemota > 0 && r.versao === versaoAgora) return;
       aplicarRemoto(estadoDoServidor(r), ym);
       Sync.versaoPorYm[ym] = r.versao;
       _ultimaRemotaPorYm[ym] = Date.now();
@@ -6019,6 +6040,7 @@ async function sincronizarMes(ym){
     return Promise.resolve(false);
   }
 
+  var tsInicioPull = Date.now();
   var promessa = (async function(){
     try {
       var versaoAtual = Sync.versaoPorYm[ym] || null;
@@ -6029,16 +6051,22 @@ async function sincronizarMes(ym){
         window.__sync = { ok: false, motivo: (r && (r.erro || "sem resposta")) || "offline" };
         return false;
       }
+      if (String(D.competencia).slice(0, 7) !== ym) return false;
 
       if (r.semMudanca){
-        if (r.versao != null && (versaoAtual == null || r.versao > versaoAtual)) Sync.versaoPorYm[ym] = r.versao;
+        var vNow = Sync.versaoPorYm[ym] || null;
+        if (r.versao != null && (vNow == null || r.versao > vNow)) Sync.versaoPorYm[ym] = r.versao;
         window.__sync = { ok: true, versao: Sync.versaoPorYm[ym], semMudanca: true, quando: new Date().toISOString() };
         return true;
       }
 
-      if (versaoAtual !== null && r.versao < versaoAtual){
-        console.warn("[sync] ignorando pull atrasado — versao", r.versao, "< atual", versaoAtual);
+      var versaoAgora = Sync.versaoPorYm[ym] || null;
+      if (versaoAgora !== null && r.versao < versaoAgora){
+        console.warn("[sync] ignorando pull atrasado — versao", r.versao, "< atual", versaoAgora);
         return true;
+      }
+      if (_ultimaInteracao > tsInicioPull || (Sync._ultimoPushPorYm && Sync._ultimoPushPorYm[ym] > tsInicioPull)) {
+        return false;
       }
 
       Sync.versaoPorYm[ym] = r.versao;

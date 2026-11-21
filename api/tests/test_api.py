@@ -85,3 +85,39 @@ def test_push_com_itens_duplicados_nao_gera_21000(monkeypatch):
             ks = [tuple(str(r[c]) for c in chaves[tabela]) for r in body]
             assert len(ks) == len(set(ks)), f"duplicatas em {tabela}: {ks}"
     assert vistos_tabelas == set(chaves)
+
+
+def test_pull_normaliza_adm_e_trata_excecao(monkeypatch):
+    import app as api_app
+
+    respostas = []
+    monkeypatch.setattr(api_app, "read_body", lambda h: {"competencia": "2026-11", "token": "t", "desdeVersao": ""})
+    monkeypatch.setattr(api_app, "resolver_token", lambda t: {"perfil": "Admin", "nome": "Adm"})
+
+    def fake_select(tabela, *a, **k):
+        if tabela == "meta":
+            return [{"versao": 5, "status": "ativa", "extras_json": {}}]
+        if tabela == "elenco":
+            return [
+                {"militar_id": "1", "adm": True, "secao": "1ªSB"},
+                {"militar_id": "2", "adm": False, "secao": "2ªSB"},
+            ]
+        return []
+
+    monkeypatch.setattr(api_app, "sb_select", fake_select)
+    monkeypatch.setattr(api_app, "json_response", lambda h, corpo, status=200: respostas.append((corpo, status)))
+
+    h = object.__new__(api_app.Handler)
+    h._pull()
+    assert respostas and respostas[0][1] == 200
+    elenco = respostas[0][0]["elenco"]
+    assert elenco[0]["adm"] == "S"
+    assert elenco[1]["adm"] == ""
+
+    # Erro interno no Supabase retorna JSON estruturado em vez de exceção não tratada
+    respostas.clear()
+    monkeypatch.setattr(api_app, "sb_select", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("falha rede")))
+    h._pull()
+    assert respostas and respostas[0][1] == 500
+    assert respostas[0][0]["ok"] is False
+    assert "falha rede" in respostas[0][0]["erro"]

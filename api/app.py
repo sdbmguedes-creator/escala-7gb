@@ -548,118 +548,130 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, {"ok": True})
 
     def _pull(self):
-        corpo = read_body(self)
-        competencia = corpo.get("competencia", "2026-11")[:7]
-        token = corpo.get("token", "")
-        desde_versao = corpo.get("desdeVersao")
-        if desde_versao is None:
-            desde_versao = corpo.get("versao")
-
-        desde_quando = corpo.get("desdeQuando") or corpo.get("desde_quando")
         try:
-            limite_mov = int(corpo.get("limiteMovimentos") or corpo.get("limite_movimentos") or 100)
-        except (ValueError, TypeError):
-            limite_mov = 100
-        limite_mov = max(1, min(500, limite_mov))
+            corpo = read_body(self)
+            competencia = corpo.get("competencia", "2026-11")[:7]
+            token = corpo.get("token", "")
+            desde_versao = corpo.get("desdeVersao")
+            if desde_versao is None:
+                desde_versao = corpo.get("versao")
 
-        u = resolver_token(token)
-        if not u:
-            json_response(self, {"ok": False, "erro": "token inválido"}, 401)
-            return
+            desde_quando = corpo.get("desdeQuando") or corpo.get("desde_quando")
+            try:
+                limite_mov = int(corpo.get("limiteMovimentos") or corpo.get("limite_movimentos") or 100)
+            except (ValueError, TypeError):
+                limite_mov = 100
+            limite_mov = max(1, min(500, limite_mov))
 
-        meta_rows = sb_select("meta", {"competencia": competencia}) or []
-        versao = meta_rows[0].get("versao", 0) if meta_rows else 0
+            u = resolver_token(token)
+            if not u:
+                json_response(self, {"ok": False, "erro": "token inválido"}, 401)
+                return
 
-        if desde_versao is not None and int(desde_versao) == int(versao):
-            json_response(self, {"ok": True, "semMudanca": True, "versao": versao})
-            return
+            meta_rows = sb_select("meta", {"competencia": competencia}) or []
+            versao = meta_rows[0].get("versao", 0) if meta_rows else 0
 
-        extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
+            if desde_versao is not None:
+                try:
+                    if int(desde_versao) == int(versao):
+                        json_response(self, {"ok": True, "semMudanca": True, "versao": versao})
+                        return
+                except (ValueError, TypeError):
+                    pass
 
-        filtros_mov = {"competencia": competencia}
-        if desde_quando:
-            filtros_mov["quando"] = f"gt.{desde_quando}"
-            ordem_mov = "quando.asc"
-        else:
-            ordem_mov = "quando.desc"
+            extras = (meta_rows[0].get("extras_json") or {}) if meta_rows else {}
 
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            fut_marcas = pool.submit(lambda: sb_select("marcas", {"competencia": competencia}) or [])
-            fut_comments = pool.submit(lambda: sb_select("comments", {"competencia": competencia}) or [])
-            fut_elenco = pool.submit(lambda: sb_select("elenco", {"competencia": competencia}) or [])
-            fut_aco = pool.submit(lambda: sb_select("aco_oficiais", {"competencia": competencia}) or [])
-            fut_mov = pool.submit(lambda: sb_select("movimentos", filtros_mov, order=ordem_mov, limit=limite_mov) or [])
+            filtros_mov = {"competencia": competencia}
+            if desde_quando:
+                filtros_mov["quando"] = f"gt.{desde_quando}"
+                ordem_mov = "quando.asc"
+            else:
+                ordem_mov = "quando.desc"
 
-            marcas = fut_marcas.result()
-            comentarios = fut_comments.result()
-            elenco = fut_elenco.result()
-            aco_rows = fut_aco.result()
-            mov = fut_mov.result()
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                fut_marcas = pool.submit(lambda: sb_select("marcas", {"competencia": competencia}) or [])
+                fut_comments = pool.submit(lambda: sb_select("comments", {"competencia": competencia}) or [])
+                fut_elenco = pool.submit(lambda: sb_select("elenco", {"competencia": competencia}) or [])
+                fut_aco = pool.submit(lambda: sb_select("aco_oficiais", {"competencia": competencia}) or [])
+                fut_mov = pool.submit(lambda: sb_select("movimentos", filtros_mov, order=ordem_mov, limit=limite_mov) or [])
 
-        marcas_out = [
-            {"g": m["grupo"], "i": m["militar_id"], "d": m["dia"], "c": m["codigo"]}
-            for m in marcas
-        ]
+                marcas = fut_marcas.result()
+                comentarios = fut_comments.result()
+                elenco = fut_elenco.result()
+                aco_rows = fut_aco.result()
+                mov = fut_mov.result()
 
-        comentarios_out = [{"k": c["chave"], "v": c["texto"]} for c in comentarios]
+            marcas_out = [
+                {"g": m["grupo"], "i": m["militar_id"], "d": m["dia"], "c": m["codigo"]}
+                for m in marcas
+            ]
 
-        elenco_out = []
-        for e in elenco:
-            elenco_out.append({
-                "id": e["militar_id"],
-                "secao": e.get("secao", ""),
-                "escala": e.get("escala", ""),
-                "motorista": e.get("motorista", ""),
-                "adm": e.get("adm", ""),
-                "restricao": bool(e.get("restricao")),
-                "cotasAdm": int(e.get("cotas_adm") or 0),
-                "afast": e.get("afast_json") or [],
-                "escalaOrigem": e.get("escala_origem", ""),
-                "escalaOrigemAdm": e.get("escala_origem_adm", ""),
-            })
+            comentarios_out = [{"k": c["chave"], "v": c["texto"]} for c in comentarios]
 
-        aco_oficiais = {}
-        for r in aco_rows:
-            aco_oficiais.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
-        movimentos = [
-            {
-                "quando":   m["quando"],
-                "tipo":     m["tipo"],
-                "origem":   m["origem"],
-                "destino":  m["destino"],
-                "qtd":      m["qtd"],
-                "motivo":   m["motivo"],
-                "autor":    m["autor"],
+            elenco_out = []
+            for e in elenco:
+                adm_raw = e.get("adm", "")
+                adm_norm = "S" if (adm_raw is True or str(adm_raw or "").strip().upper() in ("S", "TRUE", "1", "SIM")) else ""
+                elenco_out.append({
+                    "id": e["militar_id"],
+                    "secao": e.get("secao", ""),
+                    "escala": e.get("escala", ""),
+                    "motorista": e.get("motorista", ""),
+                    "adm": adm_norm,
+                    "restricao": bool(e.get("restricao")),
+                    "cotasAdm": int(e.get("cotas_adm") or 0),
+                    "afast": e.get("afast_json") or [],
+                    "escalaOrigem": e.get("escala_origem", ""),
+                    "escalaOrigemAdm": e.get("escala_origem_adm", ""),
+                })
+
+            aco_oficiais = {}
+            for r in aco_rows:
+                aco_oficiais.setdefault(r["dia"], {"t1": "", "t2": ""})[r["turno"]] = r.get("oficial", "")
+            movimentos = [
+                {
+                    "quando":   m["quando"],
+                    "tipo":     m["tipo"],
+                    "origem":   m["origem"],
+                    "destino":  m["destino"],
+                    "qtd":      m["qtd"],
+                    "motivo":   m["motivo"],
+                    "autor":    m["autor"],
+                }
+                for m in mov
+            ]
+
+            meta = {
+                "competencia": competencia,
+                "versao":      versao,
+                "status":      meta_rows[0].get("status", "ativa") if meta_rows else "ativa",
+                "params":      meta_rows[0].get("params_json") if meta_rows else None,
+                "vis":         extras.get("vis", {}),
+                "visLinhas":   extras.get("visLinhas", {}),
+                "aco":         extras.get("aco", []),
             }
-            for m in mov
-        ]
 
-        meta = {
-            "competencia": competencia,
-            "versao":      versao,
-            "status":      meta_rows[0].get("status", "ativa") if meta_rows else "ativa",
-            "params":      meta_rows[0].get("params_json") if meta_rows else None,
-            "vis":         extras.get("vis", {}),
-            "visLinhas":   extras.get("visLinhas", {}),
-            "aco":         extras.get("aco", []),
-        }
-
-        payload_pull = {
-            "ok":            True,
-            "versao":        versao,
-            "marcas":        marcas_out,
-            "comments":      comentarios_out,
-            "elenco":        elenco_out,
-            "acoOficiais":   aco_oficiais,
-            "movimentos":    movimentos,
-            "meta":          meta,
-        }
-        try:
-            tamanhos = {k: len(json.dumps(v, ensure_ascii=False).encode("utf-8")) for k, v in payload_pull.items() if k != "ok"}
-            print(f"[pull_diag] comp={competencia} tamanhos_bytes={tamanhos}")
-        except Exception:
-            pass
-        json_response(self, payload_pull)
+            payload_pull = {
+                "ok":            True,
+                "versao":        versao,
+                "marcas":        marcas_out,
+                "comments":      comentarios_out,
+                "elenco":        elenco_out,
+                "acoOficiais":   aco_oficiais,
+                "movimentos":    movimentos,
+                "meta":          meta,
+            }
+            try:
+                tamanhos = {k: len(json.dumps(v, ensure_ascii=False).encode("utf-8")) for k, v in payload_pull.items() if k != "ok"}
+                print(f"[pull_diag] comp={competencia} tamanhos_bytes={tamanhos}")
+            except Exception:
+                pass
+            json_response(self, payload_pull)
+        except Exception as e:
+            msg = str(e)
+            print(f"[pull] erro: {msg}")
+            status_code = 400 if "Supabase 400:" in msg else 500
+            json_response(self, {"ok": False, "erro": msg}, status_code)
 
     def _push(self):
         try:

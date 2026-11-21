@@ -1,16 +1,28 @@
 from concurrent.futures import ThreadPoolExecutor
 import os
 import json
+import threading
 import urllib.request
 import urllib.error
 import urllib.parse
 
 try:
     import requests as _requests
-    _HTTP_SESSION = _requests.Session()
+    _THREAD_LOCAL = threading.local()
 except Exception:
     _requests = None
-    _HTTP_SESSION = None
+    _THREAD_LOCAL = None
+
+
+def _get_http_session():
+    """Retorna uma requests.Session() isolada por thread (Session não é thread-safe)."""
+    if _requests is None or _THREAD_LOCAL is None:
+        return None
+    sess = getattr(_THREAD_LOCAL, "session", None)
+    if sess is None:
+        sess = _requests.Session()
+        _THREAD_LOCAL.session = sess
+    return sess
 
 
 def _get_supabase_config():
@@ -44,8 +56,9 @@ def sb_request(method, path, params=None, body=None, extra_headers=None, prefer=
     data = json.dumps(body).encode("utf-8") if body is not None else None
 
     try:
-        if _HTTP_SESSION is not None:
-            resp = _HTTP_SESSION.request(method, url, headers=headers, data=data, timeout=15)
+        http_session = _get_http_session()
+        if http_session is not None:
+            resp = http_session.request(method, url, headers=headers, data=data, timeout=15)
             if resp.status_code == 204:
                 return None
             txt = resp.text

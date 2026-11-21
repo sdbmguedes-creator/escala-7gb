@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
@@ -1160,5 +1160,12 @@ describe('Fila fantasma e coalescência (código real de index_v14.html)', () =>
     ]);
     expect(out.filter(o => o.t === 'mov').length).toBe(2);
     expect(out.find(o => o.t === 'elenco').campos).toEqual({ secao: 'A', escala: 'B' });
+  });
+
+  it('Sync.flush aguarda flush em andamento e atualiza versaoPorYm em incremento sequencial', () => {
+    expect(html).toContain('if (Sync.estado === "enviando" && Sync._flushEmAndamento) return Sync._flushEmAndamento;');
+    expect(html).toContain('if (vAnt == null || Number(r.versao) === Number(vAnt) + 1)');
+    expect(html).toContain('if (String(D.competencia).slice(0, 7) !== ym) return;');
+    expect(html).toContain('if (String(D.competencia).slice(0, 7) !== ym) return false;');
   });
 });
