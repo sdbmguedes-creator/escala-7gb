@@ -78,7 +78,10 @@ describe('Multiusuario A/B na competencia 2026-11 (mock)', () => {
     cy.then(() => { est2(servidor, YM).marcas[CHAVE_B] = 'F'; est2(servidor, YM).versao += 1; });
 
     // Pull do A (polling forcado) traz a marca de B e mantem a propria
+    // Aguarda debounce de pull (2000ms) e qualquer janela de interacao
+    cy.wait(2100);
     cy.window().then(w => w.atualizarDoServidor(YM));
+    cy.wait('@pull');
     cy.window().should(w => {
       const marks = estado(w, 'marks');
       expect(marks[CHAVE_A]).to.eq('X');
