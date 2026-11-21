@@ -1,5 +1,5 @@
 /* global Response */
-const CACHE_NAME = 'escala7gb-v15';
+const CACHE_NAME = 'escala7gb-v16';
 const ASSETS = [
   './',
   './index_v14.html',

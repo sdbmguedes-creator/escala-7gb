@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 /* global ehMestre, perfilAtual, marks, comments, vis, aco, statusMes, autoX,
    reconstruirIndiceMarcas, estadoSalvavel, gravarMes, esc, location,
-   AbortController, alert */
+   AbortController, alert, navigator, carregarEstado */
 /* Motor de Sincronização (extraído de frontend/index_v14.html) */
 
 /* @@sync-helpers-begin */
@@ -55,14 +55,63 @@ const Sync = {
   iniciar: function(){
     Sync.ligado = Transport.disponivel() && !!Sessao.token;
     Sync.carregarFila();
-    // fila vazia = nada pendente = sincronizado. Sem isso o indicador ficava
-    // "offline" para sempre, porque o flush sai cedo quando não há o que enviar.
-    if (Sync.ligado && !Sync.fila.length) Sync.estado = "ok";
+    var estaOffline = (typeof navigator !== "undefined" && navigator.onLine === false);
+    if (estaOffline){
+      Sync.estado = "offline";
+    } else if (Sync.ligado){
+      Sync.estado = "ok";
+    }
     Sync.pintar();
     if (Sync.ligado){
-      window.addEventListener("online", function(){ Sync.flush(); });
+      if (typeof window !== "undefined" && window.addEventListener){
+        if (Sync._onlineHandler) window.removeEventListener("online", Sync._onlineHandler);
+        if (Sync._offlineHandler) window.removeEventListener("offline", Sync._offlineHandler);
+
+        Sync._onlineHandler = function(){ Sync.aoVoltarOnline(); };
+        Sync._offlineHandler = function(){
+          if (Sync.estado !== "erro-fatal") Sync.estado = "offline";
+          Sync.pintar();
+        };
+
+        window.addEventListener("online", Sync._onlineHandler);
+        window.addEventListener("offline", Sync._offlineHandler);
+      }
       // Flush periódico: apenas a cada 5 minutos (reduzido de 60s)
       setInterval(function(){ if (Sync.fila.length) Sync.flush(); }, 300000);
+    }
+  },
+
+  aoVoltarOnline: async function(){
+    if (!Sync.ligado) return;
+    if (Sync.estado === "offline") Sync.estado = "ok";
+    Sync.pintar();
+
+    var ym = (typeof D !== "undefined" && D.competencia) ? String(D.competencia).slice(0, 7) : null;
+    if (!ym) return;
+
+    // Se houve boot offline (pullInicialConcluido ainda false), completa o ciclo inicial
+    if (!Sync.pullInicialConcluido && typeof sincronizarMes === "function"){
+      try{
+        var ok = await sincronizarMes(ym);
+        Sync.pullInicialConcluido = true;
+        if (ok){
+          if (typeof carregarEstado === "function") carregarEstado();
+          if (typeof desenhar === "function") desenhar();
+        }
+        if (typeof agendarPoll === "function") agendarPoll(ym);
+      }catch(e){
+        console.warn("[sync] pull inicial pos-online falhou:", e);
+      }
+    }
+
+    if (Sync.fila.length){
+      try{ await Sync.flush(); }catch(e){}
+    }
+
+    if (!Sync.fila.length && Sync.estado !== "enviando" && Sync.estado !== "erro-fatal"){
+      if (typeof atualizarDoServidor === "function"){
+        atualizarDoServidor(ym, true).catch(function(){});
+      }
     }
   },
 
@@ -170,6 +219,7 @@ const Sync = {
     }
 
     Sync.guardarFila();
+    if (Sync.fila.length && Sync.estado === "ok") Sync.agendar();
     })();
     Sync._flushEmAndamento = p;
     return p;
@@ -189,13 +239,40 @@ const Sync = {
   pintar: function(){
     var el = document.getElementById("syncStatus");
     if (!el) return;
-    if (!Sync.ligado){ el.textContent = ""; return; }
+    if (!Sync.ligado){
+      el.textContent = "";
+      el.title = "";
+      return;
+    }
     var n = Sync.pendentes();
-    if (Sync.estado === "enviando"){ el.textContent = "enviando…"; el.style.color = "#ffe08a"; }
-    else if (Sync.estado === "erro"){ el.textContent = "erro de envio — ver console"; el.style.color = "#ffb3b3"; }
-    else if (Sync.estado === "offline"){ el.textContent = "offline" + (n ? " · " + n + " pendente(s)" : ""); el.style.color = "#ffb3b3"; }
-    else if (n){ el.textContent = n + " pendente(s)"; el.style.color = "#ffe08a"; }
-    else { el.textContent = "sincronizado"; el.style.color = "#b7f0c1"; }
+    if (!n && Sync.fila && Sync.fila.length) n = Sync.fila.length;
+    var offlineNav = (typeof navigator !== "undefined" && navigator.onLine === false);
+
+    if (Sync.estado === "enviando"){
+      el.textContent = "enviando…";
+      el.style.color = "#ffe08a";
+      el.title = n ? (n + " operação(ões) sendo enviada(s)") : "Enviando lote...";
+    } else if (Sync.estado === "erro-fatal"){
+      el.textContent = "erro de envio" + (n ? " · " + n + " pendente(s)" : "");
+      el.style.color = "#ffb3b3";
+      el.title = Sync.ultimoErro || "Operação recusada pelo servidor";
+    } else if (Sync.estado === "erro"){
+      el.textContent = "erro de envio — ver console";
+      el.style.color = "#ffb3b3";
+      el.title = "Falha de envio — veja os detalhes no console";
+    } else if (Sync.estado === "offline" || offlineNav){
+      el.textContent = "Offline" + (n ? " · " + n + " pendente(s)" : "");
+      el.style.color = "#ffb3b3";
+      el.title = n ? (n + " operação(ões) aguardando conexão") : "Modo offline (sem pendências)";
+    } else if (n > 0){
+      el.textContent = "Pendente (" + n + ")…";
+      el.style.color = "#ffe08a";
+      el.title = n + " operação(ões) pendente(s) aguardando envio";
+    } else {
+      el.textContent = "sincronizado";
+      el.style.color = "#b7f0c1";
+      el.title = "Todas as alterações estão salvas no servidor";
+    }
   }
 };
 
@@ -663,11 +740,11 @@ var _pullAtivoPorYm = {};
 var _ultimoPullPorYm = {};
 const PULL_DEBOUNCE_MS = 2000;
 
-async function atualizarDoServidor(ym){
+async function atualizarDoServidor(ym, ignorarInteracaoRecente){
   if (!Sync.ligado || document.hidden) return;
   if (Sync.estado === "enviando") return;
   if (Sync.fila.length) return;
-  if (Date.now() - _ultimaInteracao < 1000) return; // Reduzido de 3s para 1s
+  if (!ignorarInteracaoRecente && (Date.now() - _ultimaInteracao < 1000)) return; // Reduzido de 3s para 1s
 
   // Debounce: se pull recente (< 2s) para mesma competência, retorna promise existente
   var agora = Date.now();
